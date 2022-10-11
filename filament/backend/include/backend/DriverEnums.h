@@ -48,10 +48,21 @@ static constexpr uint64_t SWAP_CHAIN_CONFIG_ENABLE_XCB          = 0x4;
 static constexpr uint64_t SWAP_CHAIN_CONFIG_APPLE_CVPIXELBUFFER = 0x8;
 
 static constexpr size_t MAX_VERTEX_ATTRIBUTE_COUNT  = 16;   // This is guaranteed by OpenGL ES.
-static constexpr size_t MAX_VERTEX_SAMPLER_COUNT    = 16;   // This is guaranteed by OpenGL ES.
-static constexpr size_t MAX_FRAGMENT_SAMPLER_COUNT  = 16;   // This is guaranteed by OpenGL ES.
-static constexpr size_t MAX_SAMPLER_COUNT           = 32;   // This is guaranteed by OpenGL ES.
+static constexpr size_t MAX_SAMPLER_COUNT           = 62;   // Maximum needed at feature level 3.
 static constexpr size_t MAX_VERTEX_BUFFER_COUNT     = 16;   // Max number of bound buffer objects.
+static constexpr size_t MAX_SSBO_COUNT              = 4;    // This is guaranteed by OpenGL ES.
+
+// Per feature level caps
+// Use (int)FeatureLevel to index this array
+static constexpr struct {
+    const size_t MAX_VERTEX_SAMPLER_COUNT;
+    const size_t MAX_FRAGMENT_SAMPLER_COUNT;
+} FEATURE_LEVEL_CAPS[4] = {
+        {  0,  0 }, // do not use
+        { 16, 16 }, // guaranteed by OpenGL ES, Vulkan and Metal
+        { 16, 16 }, // guaranteed by OpenGL ES, Vulkan and Metal
+        { 31, 31 }, // guaranteed by Metal
+};
 
 static_assert(MAX_VERTEX_BUFFER_COUNT <= MAX_VERTEX_ATTRIBUTE_COUNT,
         "The number of buffer objects that can be attached to a VertexBuffer must be "
@@ -65,7 +76,8 @@ static constexpr size_t CONFIG_SAMPLER_BINDING_COUNT = 4;   // This is guarantee
  */
 enum class FeatureLevel : uint8_t {
     FEATURE_LEVEL_1 = 1,  //!< OpenGL ES 3.0 features (default)
-    FEATURE_LEVEL_2       //!< OpenGL ES 3.1 features + 31 textures units + cubemap arrays
+    FEATURE_LEVEL_2,      //!< OpenGL ES 3.1 features + 16 textures units + cubemap arrays
+    FEATURE_LEVEL_3       //!< OpenGL ES 3.1 features + 31 textures units + cubemap arrays
 };
 
 /**
@@ -302,7 +314,8 @@ enum class ElementType : uint8_t {
 //! Buffer object binding type
 enum class BufferObjectBinding : uint8_t {
     VERTEX,
-    UNIFORM
+    UNIFORM,
+    SHADER_STORAGE
 };
 
 //! Face culling Mode
@@ -884,9 +897,10 @@ struct RasterState {
  * \privatesection
  */
 
-enum ShaderType : uint8_t {
+enum class ShaderStage : uint8_t {
     VERTEX = 0,
-    FRAGMENT = 1
+    FRAGMENT = 1,
+    COMPUTE = 2
 };
 
 static constexpr size_t PIPELINE_STAGE_COUNT = 2;
@@ -894,15 +908,18 @@ enum class ShaderStageFlags : uint8_t {
     NONE        =    0,
     VERTEX      =    0x1,
     FRAGMENT    =    0x2,
-    ALL_SHADER_STAGE_FLAGS = VERTEX | FRAGMENT
+    COMPUTE     =    0x4,
+    ALL_SHADER_STAGE_FLAGS = VERTEX | FRAGMENT | COMPUTE
 };
 
-static inline constexpr bool hasShaderType(ShaderStageFlags flags, ShaderType type) noexcept {
+static inline constexpr bool hasShaderType(ShaderStageFlags flags, ShaderStage type) noexcept {
     switch (type) {
-        case VERTEX:
+        case ShaderStage::VERTEX:
             return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::VERTEX));
-        case FRAGMENT:
+        case ShaderStage::FRAGMENT:
             return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::FRAGMENT));
+        case ShaderStage::COMPUTE:
+            return bool(uint8_t(flags) & uint8_t(ShaderStageFlags::COMPUTE));
     }
 }
 
@@ -1050,6 +1067,8 @@ template<> struct utils::EnableBitMaskOperators<filament::backend::TextureUsage>
 template<> struct utils::EnableBitMaskOperators<filament::backend::StencilFace>
         : public std::true_type {};
 template<> struct utils::EnableIntegerOperators<filament::backend::TextureCubemapFace>
+        : public std::true_type {};
+template<> struct utils::EnableIntegerOperators<filament::backend::FeatureLevel>
         : public std::true_type {};
 
 #if !defined(NDEBUG)

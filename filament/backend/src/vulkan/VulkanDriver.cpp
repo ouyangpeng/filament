@@ -885,15 +885,28 @@ bool VulkanDriver::isWorkaroundNeeded(Workaround workaround) {
 }
 
 FeatureLevel VulkanDriver::getFeatureLevel() {
-    const auto supportedSamplerCount = std::min(
-            mContext.physicalDeviceProperties.limits.maxDescriptorSetSamplers,
-            mContext.physicalDeviceProperties.limits.maxDescriptorSetSampledImages);
+    const VkPhysicalDeviceLimits& limits = mContext.physicalDeviceProperties.limits;
 
-    const bool imageCubeArray = (bool)mContext.physicalDeviceFeatures.imageCubeArray;
+    // If cubemap arrays are not supported, then this is an FL1 device.
+    if (!mContext.physicalDeviceFeatures.imageCubeArray) {
+        return FeatureLevel::FEATURE_LEVEL_1;
+    }
 
-    return (supportedSamplerCount >= 31 && imageCubeArray) ?
-            FeatureLevel::FEATURE_LEVEL_2 :
-            FeatureLevel::FEATURE_LEVEL_1;
+    // If the max sampler counts do not meet FL2 standards, then this is an FL1 device.
+    const auto& fl2 = FEATURE_LEVEL_CAPS[+FeatureLevel::FEATURE_LEVEL_2];
+    if (fl2.MAX_VERTEX_SAMPLER_COUNT < limits.maxPerStageDescriptorSamplers ||
+        fl2.MAX_FRAGMENT_SAMPLER_COUNT < limits.maxPerStageDescriptorSamplers) {
+        return FeatureLevel::FEATURE_LEVEL_1;
+    }
+
+    // If the max sampler counts do not meet FL3 standards, then this is an FL2 device.
+    const auto& fl3 = FEATURE_LEVEL_CAPS[+FeatureLevel::FEATURE_LEVEL_3];
+    if (fl3.MAX_VERTEX_SAMPLER_COUNT < limits.maxPerStageDescriptorSamplers ||
+        fl3.MAX_FRAGMENT_SAMPLER_COUNT < limits.maxPerStageDescriptorSamplers) {
+        return FeatureLevel::FEATURE_LEVEL_2;
+    }
+
+    return FeatureLevel::FEATURE_LEVEL_3;
 }
 
 math::float2 VulkanDriver::getClipSpaceParams() {
@@ -1220,7 +1233,7 @@ void VulkanDriver::beginRenderPass(Handle<HwRenderTarget> rth, const RenderPassP
         .framebuffer = vkfb,
 
         // The renderArea field constrains the LoadOp, but scissoring does not.
-        // Therefore we do not set the scissor rect here, we only need it in draw().
+        // Therefore, we do not set the scissor rect here, we only need it in draw().
         .renderArea = { .offset = {}, .extent = extent }
     };
 
@@ -1457,10 +1470,20 @@ void VulkanDriver::bindUniformBuffer(uint32_t index, Handle<HwBufferObject> boh)
     mPipelineCache.bindUniformBuffer((uint32_t) index, bo->buffer.getGpuBuffer(), offset, size);
 }
 
-void VulkanDriver::bindUniformBufferRange(uint32_t index, Handle<HwBufferObject> boh,
-        uint32_t offset, uint32_t size) {
+void VulkanDriver::bindBufferRange(BufferObjectBinding bindingType, uint32_t index,
+        Handle<HwBufferObject> boh, uint32_t offset, uint32_t size) {
+
+    assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
+                     bindingType == BufferObjectBinding::UNIFORM);
+
+    // TODO: implement BufferObjectBinding::SHADER_STORAGE case
+
     auto* bo = handle_cast<VulkanBufferObject*>(boh);
     mPipelineCache.bindUniformBuffer((uint32_t)index, bo->buffer.getGpuBuffer(), offset, size);
+}
+
+void VulkanDriver::unbindBuffer(BufferObjectBinding bindingType, uint32_t index) {
+    // TODO: implement unbindBuffer()
 }
 
 void VulkanDriver::bindSamplers(uint32_t index, Handle<HwSamplerGroup> sbh) {
@@ -1560,7 +1583,8 @@ void VulkanDriver::readPixels(Handle<HwRenderTarget> src, uint32_t x, uint32_t y
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = memReqs.size,
         .memoryTypeIndex = mContext.selectMemoryType(memReqs.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+                VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
     };
 
     vkAllocateMemory(device, &allocInfo, nullptr, &stagingMemory);
@@ -1676,6 +1700,12 @@ void VulkanDriver::readPixels(Handle<HwRenderTarget> src, uint32_t x, uint32_t y
     scheduleDestroy(std::move(pbd));
 }
 
+void VulkanDriver::readBufferSubData(backend::BufferObjectHandle boh,
+        uint32_t offset, uint32_t size, backend::BufferDescriptor&& p) {
+    // TODO: implement readBufferSubData
+    scheduleDestroy(std::move(p));
+}
+
 void VulkanDriver::blit(TargetBufferFlags buffers, Handle<HwRenderTarget> dst, Viewport dstRect,
         Handle<HwRenderTarget> src, Viewport srcRect, SamplerMagFilter filter) {
     assert_invariant(mContext.currentRenderPass.renderPass == VK_NULL_HANDLE);
@@ -1728,7 +1758,7 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
     Handle<HwProgram> programHandle = pipelineState.program;
     RasterState rasterState = pipelineState.rasterState;
     PolygonOffset depthOffset = pipelineState.polygonOffset;
-    const Viewport& viewportScissor = pipelineState.scissor;
+    const Viewport& scissorBox = pipelineState.scissor;
 
     auto* program = handle_cast<VulkanProgram*>(programHandle);
     mDisposer.acquire(program);
@@ -1822,7 +1852,8 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
     // where "SamplerBinding" is the integer in the GLSL, and SamplerGroupBinding is the abstract
     // Filament concept used to form groups of samplers.
 
-    VkDescriptorImageInfo iInfo[VulkanPipelineCache::SAMPLER_BINDING_COUNT] = {};
+    VkDescriptorImageInfo samplerInfo[VulkanPipelineCache::SAMPLER_BINDING_COUNT] = {};
+    VulkanPipelineCache::UsageFlags usage;
 
     for (uint8_t samplerGroupIdx = 0; samplerGroupIdx < Program::SAMPLER_BINDING_COUNT; samplerGroupIdx++) {
         const auto& samplerGroup = program->samplerGroupInfo[samplerGroupIdx];
@@ -1838,7 +1869,6 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
         assert_invariant(sb->getSize() == samplers.size());
         size_t samplerIdx = 0;
         for (auto& sampler : samplers) {
-            size_t bindingPoint = sampler.binding;
             const SamplerDescriptor* boundSampler = sb->data() + samplerIdx;
             samplerIdx++;
 
@@ -1847,11 +1877,13 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
                 mDisposer.acquire(texture);
 
                 // TODO: can this uninitialized check be checked in a higher layer?
+                // This fallback path is very flaky because the dummy texture might not have
+                // matching characteristics. (e.g. if the missing texture is a 3D texture)
                 if (UTILS_UNLIKELY(texture->getPrimaryImageLayout() == VK_IMAGE_LAYOUT_UNDEFINED)) {
 #ifndef NDEBUG
                     utils::slog.w << "Uninitialized texture bound to '" << sampler.name.c_str() << "'";
                     utils::slog.w << " in material '" << program->name.c_str() << "'";
-                    utils::slog.w << " at binding point " << +bindingPoint << utils::io::endl;
+                    utils::slog.w << " at binding point " << +sampler.binding << utils::io::endl;
 #endif
                     texture = mContext.emptyTexture;
                 }
@@ -1859,17 +1891,18 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
                 const SamplerParams& samplerParams = boundSampler->s;
                 VkSampler vksampler = mSamplerCache.getSampler(samplerParams);
 
-                iInfo[bindingPoint] = {
+                usage = VulkanPipelineCache::getUsageFlags(sampler.binding, samplerGroup.stageFlags, usage);
+
+                samplerInfo[sampler.binding] = {
                     .sampler = vksampler,
                     .imageView = texture->getPrimaryImageView(),
                     .imageLayout = texture->getPrimaryImageLayout()
                 };
-
             }
         }
     }
 
-    mPipelineCache.bindSamplers(iInfo);
+    mPipelineCache.bindSamplers(samplerInfo, usage);
 
     // Bind new descriptor sets if they need to change.
     // If descriptor set allocation failed, skip the draw call and bail. No need to emit an error
@@ -1879,16 +1912,21 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
     }
 
     // Set scissoring.
-    // Compute the intersection of the requested scissor rectangle with the current viewport.
-    const int32_t x = std::max(viewportScissor.left, (int32_t)mContext.viewport.x);
-    const int32_t y = std::max(viewportScissor.bottom, (int32_t)mContext.viewport.y);
-    const int32_t right = std::min(viewportScissor.left + (int32_t)viewportScissor.width,
-            (int32_t)(mContext.viewport.x + mContext.viewport.width));
-    const int32_t top = std::min(viewportScissor.bottom + (int32_t)viewportScissor.height,
-            (int32_t)(mContext.viewport.y + mContext.viewport.height));
+    // clamp left-bottom to 0,0 and avoid overflows
+    constexpr int32_t maxvali  = std::numeric_limits<int32_t>::max();
+    constexpr uint32_t maxvalu  = std::numeric_limits<int32_t>::max();
+    int32_t l = scissorBox.left;
+    int32_t b = scissorBox.bottom;
+    uint32_t w = std::min(maxvalu, scissorBox.width);
+    uint32_t h = std::min(maxvalu, scissorBox.height);
+    int32_t r = (l > int32_t(maxvalu - w)) ? maxvali : l + int32_t(w);
+    int32_t t = (b > int32_t(maxvalu - h)) ? maxvali : b + int32_t(h);
+    l = std::max(0, l);
+    b = std::max(0, b);
+    assert_invariant(r >= l && t >= b);
     VkRect2D scissor{
-            .offset = { std::max(0, x), std::max(0, y) },
-            .extent = { (uint32_t)right - x, (uint32_t)top - y }
+            .offset = { l, b },
+            .extent = { uint32_t(r - l), uint32_t(t - b) }
     };
 
     rt->transformClientRectToPlatform(&scissor);
@@ -1914,6 +1952,10 @@ void VulkanDriver::draw(PipelineState pipelineState, Handle<HwRenderPrimitive> r
     const int32_t vertexOffset = 0;
     const uint32_t firstInstId = 0;
     vkCmdDrawIndexed(cmdbuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstId);
+}
+
+void VulkanDriver::dispatchCompute(Handle<HwProgram> program, math::uint3 workGroupCount) {
+    // FIXME: implement me
 }
 
 void VulkanDriver::beginTimerQuery(Handle<HwTimerQuery> tqh) {

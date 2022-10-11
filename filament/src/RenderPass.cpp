@@ -85,6 +85,13 @@ void RenderPass::overridePolygonOffset(backend::PolygonOffset const* polygonOffs
     }
 }
 
+
+void RenderPass::setScissorViewport(backend::Viewport viewport) noexcept {
+    assert_invariant(viewport.width  <= std::numeric_limits<int32_t>::max());
+    assert_invariant(viewport.height <= std::numeric_limits<int32_t>::max());
+    mScissorViewport = viewport;
+}
+
 void RenderPass::overrideScissor(backend::Viewport const* scissor) noexcept {
     if ((mScissorOverride = (scissor != nullptr))) {
         mScissor = *scissor;
@@ -371,12 +378,14 @@ void RenderPass::generateCommands(uint32_t commandTypeFlags, Command* const comm
     // the list twice)
 
     // compute how much maximum storage we need
-    uint32_t offset = FScene::getPrimitiveCount(soa, range.first);
     // double the color pass for transparent objects that need to render twice
     const bool colorPass  = bool(commandTypeFlags & CommandTypeFlags::COLOR);
     const bool depthPass  = bool(commandTypeFlags & CommandTypeFlags::DEPTH);
-    offset *= uint32_t(colorPass * 2 + depthPass);
-    Command* const curr = commands + offset;
+    const size_t commandsPerPrimitive = uint32_t(colorPass * 2 + depthPass);
+    const size_t offsetBegin = FScene::getPrimitiveCount(soa, range.first) * commandsPerPrimitive;
+    const size_t offsetEnd   = FScene::getPrimitiveCount(soa, range.last) * commandsPerPrimitive;
+    Command* curr = commands + offsetBegin;
+    Command* const last = commands + offsetEnd;
 
     /*
      * The switch {} below is to coerce the compiler into generating different versions of
@@ -389,23 +398,31 @@ void RenderPass::generateCommands(uint32_t commandTypeFlags, Command* const comm
 
     switch (commandTypeFlags & (CommandTypeFlags::COLOR | CommandTypeFlags::DEPTH)) {
         case CommandTypeFlags::COLOR:
-            generateCommandsImpl<CommandTypeFlags::COLOR>(commandTypeFlags, curr,
+            curr = generateCommandsImpl<CommandTypeFlags::COLOR>(commandTypeFlags, curr,
                     soa, range, variant, renderFlags, visibilityMask, cameraPosition, cameraForward);
             break;
         case CommandTypeFlags::DEPTH:
-            generateCommandsImpl<CommandTypeFlags::DEPTH>(commandTypeFlags, curr,
+            curr = generateCommandsImpl<CommandTypeFlags::DEPTH>(commandTypeFlags, curr,
                     soa, range, variant, renderFlags, visibilityMask, cameraPosition, cameraForward);
             break;
         default:
             // we should never end-up here
             break;
     }
+
+    assert_invariant(curr <= last);
+
+    // commands may have been skipped, cancel all of them.
+    while (curr != last) {
+        curr->key = uint64_t(Pass::SENTINEL);
+        ++curr;
+    }
 }
 
 /* static */
 template<uint32_t commandTypeFlags>
 UTILS_NOINLINE
-void RenderPass::generateCommandsImpl(uint32_t extraFlags,
+RenderPass::Command* RenderPass::generateCommandsImpl(uint32_t extraFlags,
         Command* UTILS_RESTRICT curr,
         FScene::RenderableSoa const& UTILS_RESTRICT soa, Range<uint32_t> range,
         Variant variant, RenderFlags renderFlags, FScene::VisibleMaskType visibilityMask,
@@ -451,17 +468,8 @@ void RenderPass::generateCommandsImpl(uint32_t extraFlags,
     const float cameraPositionDotCameraForward = dot(cameraPosition, cameraForward);
 
     for (uint32_t i = range.first; i < range.last; ++i) {
-        // Check if this renderable passes the visibilityMask. If it doesn't, encode SENTINEL
-        // commands (no-op).
+        // Check if this renderable passes the visibilityMask.
         if (UTILS_UNLIKELY(!(soaVisibilityMask[i] & visibilityMask))) {
-            // We need to encode a SENTINEL for each command that would have been generated
-            // otherwise. Color passes get 2 commands per primitive; depth passes get 1.
-            const Slice<FRenderPrimitive>& primitives = soaPrimitives[i];
-            const size_t commandsToEncode = (isColorPass * 2 + isDepthPass) * primitives.size();
-            for (size_t j = 0; j < commandsToEncode; j++) {
-                curr->key = uint64_t(Pass::SENTINEL);
-                ++curr;
-            }
             continue;
         }
 
@@ -534,6 +542,11 @@ void RenderPass::generateCommandsImpl(uint32_t extraFlags,
          */
         for (size_t pi = 0, c = primitives.size(); pi < c; ++pi) {
             auto const& primitive = primitives[pi];
+            // handle the case where this primitive is empty / no-op
+            if (primitive.getPrimitiveType() == PrimitiveType::NONE) {
+                continue;
+            }
+
             auto const& morphTargets = morphing.targets[pi];
             FMaterialInstance const* const mi = primitive.getMaterialInstance();
             FMaterial const* const ma = mi->getMaterial();
@@ -590,9 +603,6 @@ void RenderPass::generateCommandsImpl(uint32_t extraFlags,
                     // draw this command AFTER THE NEXT ONE
                     key |= makeField(1, BLEND_TWO_PASS_MASK, BLEND_TWO_PASS_SHIFT);
 
-                    // handle the case where this primitive is empty / no-op
-                    key |= select(primitive.getPrimitiveType() == PrimitiveType::NONE);
-
                     // correct for TransparencyMode::DEFAULT -- i.e. cancel the command
                     key |= select(mode == TransparencyMode::DEFAULT);
 
@@ -622,14 +632,9 @@ void RenderPass::generateCommandsImpl(uint32_t extraFlags,
                     // bucketizes the depth by its log2 and in 4 linear chunks in each bucket.
                     cmdColor.key &= ~Z_BUCKET_MASK;
                     cmdColor.key |= makeField(distanceBits >> 22u, Z_BUCKET_MASK, Z_BUCKET_SHIFT);
-
-                    curr->key = uint64_t(Pass::SENTINEL);
-                    ++curr;
                 }
 
                 *curr = cmdColor;
-                // handle the case where this primitive is empty / no-op
-                curr->key |= select(primitive.getPrimitiveType() == PrimitiveType::NONE);
                 ++curr;
             }
 
@@ -659,13 +664,11 @@ void RenderPass::generateCommandsImpl(uint32_t extraFlags,
                         & !(depthFilterAlphaMaskedObjects & rs.alphaToCoverage))
                             | writeDepthForShadowCasters;
                 *curr = cmdDepth;
-
-                // handle the case where this primitive is empty / no-op
-                curr->key |= select(primitive.getPrimitiveType() == PrimitiveType::NONE);
                 ++curr;
             }
         }
     }
+    return curr;
 }
 
 void RenderPass::updateSummedPrimitiveCounts(
@@ -751,7 +754,34 @@ void RenderPass::Executor::recordDriverCommands(FEngine& engine, backend::Driver
                 // this is always taken the first time
                 mi = info.mi;
                 ma = mi->getMaterial();
-                *pScissor = mi->getScissor();
+
+                auto const& scissor = mi->getScissor();
+                if (UTILS_UNLIKELY(mi->hasScissor())) {
+                    // scissor is set, we need to apply the offset/clip
+                    // clang vectorizes this!
+                    constexpr int32_t maxvali = std::numeric_limits<int32_t>::max();
+                    const backend::Viewport scissorViewport = mScissorViewport;
+                    // compute new left/bottom, assume no overflow
+                    int32_t l = scissor.left + scissorViewport.left;
+                    int32_t b = scissor.bottom + scissorViewport.bottom;
+                    // compute right/top without overflowing, scissor.width/height guaranteed
+                    // to convert to int32
+                    int32_t r = (l > maxvali - int32_t(scissor.width)) ?
+                            maxvali : l + int32_t(scissor.width);
+                    int32_t t = (b > maxvali - int32_t(scissor.height)) ?
+                            maxvali : b + int32_t(scissor.height);
+                    // clip to the viewport
+                    l = std::max(l, scissorViewport.left);
+                    b = std::max(b, scissorViewport.bottom);
+                    r = std::min(r, scissorViewport.left + int32_t(scissorViewport.width));
+                    t = std::min(t, scissorViewport.bottom + int32_t(scissorViewport.height));
+                    assert_invariant(r >= l && t >= b);
+                    *pScissor = { l, b, uint32_t(r - l), uint32_t(t - b) };
+                } else {
+                    // no scissor set (common case), 'scissor' has its default value, use that.
+                    *pScissor = scissor;
+                }
+
                 *pPipelinePolygonOffset = mi->getPolygonOffset();
                 pipeline.stencilState = mi->getStencilState();
                 mi->use(driver);
@@ -761,14 +791,16 @@ void RenderPass::Executor::recordDriverCommands(FEngine& engine, backend::Driver
 
             // bind per-renderable uniform block. there is no need to attempt to skip this command
             // because the backends already do this.
-            driver.bindUniformBufferRange(+UniformBindingPoints::PER_RENDERABLE,
+            driver.bindBufferRange(BufferObjectBinding::UNIFORM,
+                    +UniformBindingPoints::PER_RENDERABLE,
                     (info.instanceCount > 1) ? mInstancedUboHandle : uboHandle,
                     info.index * sizeof(PerRenderableData),
                     sizeof(PerRenderableUib));
 
             if (UTILS_UNLIKELY(info.skinningHandle)) {
                 // note: we can't bind less than sizeof(PerRenderableBoneUib) due to glsl limitations
-                driver.bindUniformBufferRange(+UniformBindingPoints::PER_RENDERABLE_BONES,
+                driver.bindBufferRange(BufferObjectBinding::UNIFORM,
+                        +UniformBindingPoints::PER_RENDERABLE_BONES,
                         info.skinningHandle,
                         info.skinningOffset * sizeof(PerRenderableBoneUib::BoneData),
                         sizeof(PerRenderableBoneUib));
@@ -805,6 +837,7 @@ RenderPass::Executor::Executor(RenderPass const* pass, Command const* b, Command
           mInstancedUboHandle(pass->mInstancedUboHandle),
           mPolygonOffset(pass->mPolygonOffset),
           mScissor(pass->mScissor),
+          mScissorViewport(pass->mScissorViewport),
           mPolygonOffsetOverride(pass->mPolygonOffsetOverride),
           mScissorOverride(pass->mScissorOverride) {
     assert_invariant(b >= pass->begin());

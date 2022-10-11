@@ -34,7 +34,7 @@ namespace filament::backend {
 class Program {
 public:
 
-    static constexpr size_t SHADER_TYPE_COUNT = 2;
+    static constexpr size_t SHADER_TYPE_COUNT = 3;
     static constexpr size_t UNIFORM_BINDING_COUNT = CONFIG_UNIFORM_BINDING_COUNT;
     static constexpr size_t SAMPLER_BINDING_COUNT = CONFIG_SAMPLER_BINDING_COUNT;
 
@@ -70,7 +70,7 @@ public:
     // sets one of the program's shader (e.g. vertex, fragment)
     // string-based shaders are null terminated, consequently the size parameter must include the
     // null terminating character.
-    Program& shader(ShaderType shader, void const* data, size_t size);
+    Program& shader(ShaderStage shader, void const* data, size_t size);
 
     // Note: This is only needed for GLES3.0 backends, because the layout(binding=) syntax is
     //       not permitted in glsl. The backend needs a way to associate a uniform block

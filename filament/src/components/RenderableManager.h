@@ -17,7 +17,7 @@
 #ifndef TNT_FILAMENT_COMPONENTS_RENDERABLEMANAGER_H
 #define TNT_FILAMENT_COMPONENTS_RENDERABLEMANAGER_H
 
-#include "upcast.h"
+#include "downcast.h"
 
 #include "HwRenderPrimitiveFactory.h"
 #include "UniformBuffer.h"
@@ -121,6 +121,7 @@ public:
     void setMorphWeights(Instance instance, float const* weights, size_t count, size_t offset);
     void setMorphTargetBufferAt(Instance instance, uint8_t level, size_t primitiveIndex,
             FMorphTargetBuffer* morphTargetBuffer, size_t offset, size_t count);
+    MorphTargetBuffer* getMorphTargetBufferAt(Instance instance, uint8_t level, size_t primitiveIndex) const noexcept;
     size_t getMorphTargetCount(Instance instance) const noexcept;
 
     void setLightChannel(Instance instance, unsigned int channel, bool enable) noexcept;
@@ -257,7 +258,7 @@ private:
     HwRenderPrimitiveFactory mHwRenderPrimitiveFactory;
 };
 
-FILAMENT_UPCAST(RenderableManager)
+FILAMENT_DOWNCAST(RenderableManager)
 
 void FRenderableManager::setAxisAlignedBoundingBox(Instance instance, const Box& aabb) noexcept {
     if (instance) {

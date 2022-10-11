@@ -79,11 +79,9 @@ public:
     // Marks the given texture as being fully decoded, with all miplevels initialized.
     void markAsReady(Texture* texture);
 
-    // Marks the material as ready, but due to an error.
-    //
-    // This should be called when it known that at least one of the material's texture
-    // dependencies will never become available.
-    void markAsError(Material* material) { markAsReady(material); }
+    // Causes the dependency graph to enter a disabled state, whereby adding Entity <=> Material
+    // edges will immediately mark the entity as ready without actually growing the graph.
+    void disableProgressiveReveal();
 
 private:
     struct TextureNode {
@@ -116,6 +114,7 @@ private:
     tsl::robin_map<Texture*, std::unique_ptr<TextureNode>> mTextureNodes;
 
     std::queue<Entity> mReadyRenderables;
+    bool mDisabled = false;
 };
 
 } // namespace filament::gltfio

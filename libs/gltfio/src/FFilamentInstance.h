@@ -29,7 +29,7 @@
 
 #include <vector>
 
-#include "upcast.h"
+#include "downcast.h"
 
 struct cgltf_node;
 
@@ -54,7 +54,30 @@ struct Variant {
 };
 
 struct FFilamentInstance : public FilamentInstance {
-    FFilamentInstance(utils::Entity root, FFilamentAsset* owner);
+    FFilamentInstance(utils::Entity root, FFilamentAsset const* owner);
+    ~FFilamentInstance();
+
+    size_t getMaterialInstanceCount() const noexcept {
+        return mMaterialInstances.size();
+    }
+
+    const MaterialInstance* const* getMaterialInstances() const noexcept {
+        return mMaterialInstances.data();
+    }
+
+    MaterialInstance* const* getMaterialInstances() noexcept {
+        return mMaterialInstances.data();
+    }
+
+    void detachMaterialInstances() {
+        mMaterialInstances.clear();
+    }
+
+    void applyMaterialVariant(size_t variantIndex) noexcept;
+
+    size_t getMaterialVariantCount() const noexcept;
+
+    const char* getMaterialVariantName(size_t variantIndex) const noexcept;
 
     // The per-instance skin structure caches information to allow animation to be applied
     // efficiently at run time. Note that shared immutable data, such as the skin name and inverse
@@ -69,7 +92,7 @@ struct FFilamentInstance : public FilamentInstance {
     };
 
     const utils::Entity root;
-    FFilamentAsset* const owner;
+    FFilamentAsset const* owner;
 
     std::vector<utils::Entity> entities;
     utils::FixedCapacityVector<Variant> variants;
@@ -80,10 +103,12 @@ struct FFilamentInstance : public FilamentInstance {
     // may be sparsely populated. This is used as a simple mapping between cgltf_node and Entity,
     // and therefore has the same size as the number of cgltf_node in the original asset. We
     // considered using the ECS for this, but we need Node => Entity, not the other way around.
-    // This is discarded after the animator is created.
     utils::FixedCapacityVector<utils::Entity> nodeMap;
 
     Aabb boundingBox;
+
+    utils::FixedCapacityVector<MaterialInstance*> mMaterialInstances;
+
     void createAnimator();
     Animator* getAnimator() const noexcept;
     size_t getSkinCount() const noexcept;
@@ -92,11 +117,10 @@ struct FFilamentInstance : public FilamentInstance {
     const utils::Entity* getJointsAt(size_t skinIndex) const noexcept;
     void attachSkin(size_t skinIndex, utils::Entity target) noexcept;
     void detachSkin(size_t skinIndex, utils::Entity target) noexcept;
-    void applyMaterialVariant(size_t variantIndex) noexcept;
     void recomputeBoundingBoxes();
 };
 
-FILAMENT_UPCAST(FilamentInstance)
+FILAMENT_DOWNCAST(FilamentInstance)
 
 } // namespace filament::gltfio
 

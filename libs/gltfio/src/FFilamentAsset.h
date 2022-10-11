@@ -30,6 +30,7 @@
 #include <filament/VertexBuffer.h>
 
 #include <gltfio/MaterialProvider.h>
+#include <gltfio/TextureProvider.h>
 
 #include <math/mat4.h>
 
@@ -39,7 +40,7 @@
 
 #include <cgltf.h>
 
-#include "upcast.h"
+#include "downcast.h"
 #include "DependencyGraph.h"
 #include "DracoCache.h"
 #include "FFilamentInstance.h"
@@ -69,7 +70,6 @@ namespace utils {
 
 namespace filament::gltfio {
 
-class Animator;
 class Wireframe;
 
 // Encapsulates VertexBuffer::setBufferAt() or IndexBuffer::setBuffer().
@@ -87,11 +87,8 @@ struct BufferSlot {
 // Since material instances are not typically shared between FilamentInstance, the slots are a
 // unified list across all instances that exist before creation of Texture objects.
 struct TextureSlot {
-    size_t sourceTexture; // index into cgltf_texture
     MaterialInstance* materialInstance;
     const char* materialParameter;
-    TextureSampler sampler;
-    bool srgb;
 };
 
 // MeshCache
@@ -117,7 +114,7 @@ struct FFilamentAsset : public FilamentAsset {
             mEngine(engine), mNameManager(names), mEntityManager(entityManager),
             mNodeManager(nodeManager),
             mSourceAsset(new SourceAsset {(cgltf_data*)srcAsset}),
-            mTextureBindings(srcAsset->textures_count, 0),
+            mTextures(srcAsset->textures_count),
             mMeshCache(srcAsset->meshes_count) {}
 
     ~FFilamentAsset();
@@ -143,7 +140,9 @@ struct FFilamentAsset : public FilamentAsset {
     }
 
     size_t getRenderableEntityCount() const noexcept {
-        return mRenderableCount;
+        // Note that mRenderableCount is a "predicted" number of renderables, so if this is a
+        // zero-instance asset, then we need to explicitly return zero.
+        return mEntities.empty() ? 0 : mRenderableCount;
     }
 
     const utils::Entity* getCameraEntities() const noexcept {
@@ -160,18 +159,6 @@ struct FFilamentAsset : public FilamentAsset {
 
     size_t popRenderables(utils::Entity* entities, size_t count) noexcept {
         return mDependencyGraph.popRenderables(entities, count);
-    }
-
-    size_t getMaterialInstanceCount() const noexcept {
-        return mMaterialInstances.size();
-    }
-
-    const MaterialInstance* const* getMaterialInstances() const noexcept {
-        return mMaterialInstances.data();
-    }
-
-    MaterialInstance* const* getMaterialInstances() noexcept {
-        return mMaterialInstances.data();
     }
 
     size_t getResourceUriCount() const noexcept {
@@ -198,17 +185,9 @@ struct FFilamentAsset : public FilamentAsset {
     size_t getEntitiesByPrefix(const char* prefix, utils::Entity* entities,
             size_t maxCount) const noexcept;
 
-    Animator* getAnimator() const noexcept { return mAnimator; }
-
     const char* getMorphTargetNameAt(utils::Entity entity, size_t targetIndex) const noexcept;
 
     size_t getMorphTargetCountAt(utils::Entity entity) const noexcept;
-
-    size_t getMaterialVariantCount() const noexcept;
-
-    const char* getMaterialVariantName(size_t variantIndex) const noexcept;
-
-    void applyMaterialVariant(size_t variantIndex) noexcept;
 
     utils::Entity getWireframe() noexcept;
 
@@ -237,46 +216,22 @@ struct FFilamentAsset : public FilamentAsset {
     }
 
     void addEntitiesToScene(Scene& targetScene, const Entity* entities, size_t count,
-            SceneMask sceneFilter);
+            SceneMask sceneFilter) const;
 
     void detachFilamentComponents() noexcept {
         mDetachedFilamentComponents = true;
     }
 
-    void detachMaterialInstances() {
-        mMaterialInstances.clear();
-    }
-
     // end public API
 
-    void attachTexture(Texture* texture) {
-        mTextures.push_back(texture);
-    }
+    // If a Filament Texture for the given args already exists, calls setParameter() and returns
+    // early. If the Texture doesn't exist yet, stashes binding information for later.
+    void addTextureBinding(MaterialInstance* materialInstance, const char* parameterName,
+        const cgltf_texture* srcTexture, TextureProvider::TextureFlags flags);
 
-    void bindTexture(const TextureSlot& tb, Texture* texture) {
-        assert_invariant(texture);
-        tb.materialInstance->setParameter(tb.materialParameter, texture, tb.sampler);
-        mDependencyGraph.addEdge(texture, tb.materialInstance, tb.materialParameter);
-        mTextureBindings[tb.sourceTexture] = texture;
-    }
-
-    // If a Filament Texture already exists for the given slot, go ahead and bind it to the
-    // given material instance. (This can occur when creating new FilamentInstances)
-    // Otherwise, stash the binding information so that ResourceLoader can trigger the bind.
-    void addTextureSlot(const TextureSlot& tb) {
-        if (mResourcesLoaded) {
-            Texture* texture = mTextureBindings[tb.sourceTexture];
-            assert_invariant(texture);
-            tb.materialInstance->setParameter(tb.materialParameter, texture, tb.sampler);
-            // Intentionally omit adding a dependency graph edge here. We do not need progressive
-            // reveal for multiple FilamentInstance.
-        } else {
-            mTextureSlots.push_back(tb);
-            mDependencyGraph.addEdge(tb.materialInstance, tb.materialParameter);
-        }
-    }
-
-    void createAnimators();
+    // Calls mi->setParameter() for the given texture slot and optionally adds an edge
+    // to the dependency graph used for gradual reveal of entities.
+    void applyTextureBinding(size_t textureIndex,const TextureSlot& tb, bool addDependency = true);
 
     struct Skin {
         utils::CString name;
@@ -291,19 +246,15 @@ struct FFilamentAsset : public FilamentAsset {
     std::vector<utils::Entity> mLightEntities;
     std::vector<utils::Entity> mCameraEntities;
     size_t mRenderableCount = 0;
-    std::vector<MaterialInstance*> mMaterialInstances;
     std::vector<VertexBuffer*> mVertexBuffers;
     std::vector<BufferObject*> mBufferObjects;
     std::vector<IndexBuffer*> mIndexBuffers;
     std::vector<MorphTargetBuffer*> mMorphTargetBuffers;
-    std::vector<Texture*> mTextures;
     utils::FixedCapacityVector<Skin> mSkins;
-    utils::FixedCapacityVector<Variant> mVariants;
     utils::FixedCapacityVector<utils::CString> mScenes;
     Aabb mBoundingBox;
     utils::Entity mRoot;
     std::vector<FFilamentInstance*> mInstances;
-    Animator* mAnimator = nullptr;
     Wireframe* mWireframe = nullptr;
 
     // Indicates if resource decoding has started (not necessarily finished)
@@ -333,8 +284,19 @@ struct FFilamentAsset : public FilamentAsset {
     using SourceHandle = std::shared_ptr<SourceAsset>;
     SourceHandle mSourceAsset;
 
+    // Stores all information related to a single cgltf_texture.
+    // Note that more than one cgltf_texture can map to a single Filament texture,
+    // e.g. if several have the same URL or bufferView. For each Filament texture,
+    // only one of its corresponding TextureInfo slots will have isOwner=true.
+    struct TextureInfo {
+        std::vector<TextureSlot> bindings;
+        Texture* texture;
+        TextureProvider::TextureFlags flags;
+        bool isOwner;
+    };
+
     // Mapping from cgltf_texture to Texture* is required when creating new instances.
-    utils::FixedCapacityVector<Texture*> mTextureBindings;
+    utils::FixedCapacityVector<TextureInfo> mTextures;
 
     // Resource URIs can be queried by the end user.
     utils::FixedCapacityVector<const char*> mResourceUris;
@@ -344,11 +306,10 @@ struct FFilamentAsset : public FilamentAsset {
 
     // Asset information that is produced by AssetLoader and consumed by ResourceLoader:
     std::vector<BufferSlot> mBufferSlots;
-    std::vector<TextureSlot> mTextureSlots;
     std::vector<std::pair<const cgltf_primitive*, VertexBuffer*> > mPrimitives;
 };
 
-FILAMENT_UPCAST(FilamentAsset)
+FILAMENT_DOWNCAST(FilamentAsset)
 
 } // namespace filament::gltfio
 

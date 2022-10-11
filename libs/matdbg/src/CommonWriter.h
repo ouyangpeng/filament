@@ -38,8 +38,8 @@ static bool read(const filaflat::ChunkContainer& container, filamat::ChunkType t
     if (!container.hasChunk(type)) {
         return false;
     }
-
-    filaflat::Unflattener unflattener(container.getChunkStart(type), container.getChunkEnd(type));
+    auto [start, end] = container.getChunkRange(type);
+    filaflat::Unflattener unflattener(start, end);
     return unflattener.read(value);
 }
 
@@ -52,6 +52,7 @@ const char* toString(Shading shadingModel) noexcept {
         case Shading::CLOTH: return "cloth";
         case Shading::SPECULAR_GLOSSINESS: return "specularGlossiness";
     }
+    return "--";
 }
 
 inline
@@ -65,6 +66,7 @@ const char* toString(BlendingMode blendingMode) noexcept {
         case BlendingMode::MULTIPLY: return "multiply";
         case BlendingMode::SCREEN: return "screen";
     }
+    return "--";
 }
 
 inline
@@ -73,6 +75,7 @@ const char* toString(Interpolation interpolation) noexcept {
         case Interpolation::SMOOTH: return "smooth";
         case Interpolation::FLAT: return "flat";
     }
+    return "--";
 }
 
 inline
@@ -83,6 +86,7 @@ const char* toString(VertexDomain domain) noexcept {
         case VertexDomain::VIEW: return "view";
         case VertexDomain::DEVICE: return "device";
     }
+    return "--";
 }
 
 
@@ -91,7 +95,9 @@ const char* toString(MaterialDomain domain) noexcept {
     switch (domain) {
         case MaterialDomain::SURFACE: return "surface";
         case MaterialDomain::POST_PROCESS: return "post process";
+        case MaterialDomain::COMPUTE: return "compute";
     }
+    return "--";
 }
 
 inline
@@ -102,6 +108,7 @@ const char* toString(backend::CullingMode cullingMode) noexcept {
         case backend::CullingMode::BACK: return "back";
         case backend::CullingMode::FRONT_AND_BACK: return "front & back";
     }
+    return "--";
 }
 
 inline
@@ -111,6 +118,7 @@ const char* toString(TransparencyMode transparencyMode) noexcept {
         case TransparencyMode::TWO_PASSES_ONE_SIDE: return "two passes, one side";
         case TransparencyMode::TWO_PASSES_TWO_SIDES: return "two passes, two sides";
     }
+    return "--";
 }
 
 inline
@@ -141,10 +149,10 @@ const char* toString(bool value) {
 }
 
 inline
-const char* toString(backend::ShaderType stage) noexcept {
+const char* toString(backend::ShaderStage stage) noexcept {
     switch (stage) {
-        case backend::ShaderType::VERTEX: return "vs";
-        case backend::ShaderType::FRAGMENT: return "fs";
+        case backend::ShaderStage::VERTEX: return "vs";
+        case backend::ShaderStage::FRAGMENT: return "fs";
         default: break;
     }
     return "--";
@@ -156,6 +164,7 @@ const char* toString(backend::ShaderModel model) noexcept {
         case backend::ShaderModel::MOBILE: return "mobile";
         case backend::ShaderModel::DESKTOP: return "desktop";
     }
+    return "--";
 }
 
 inline
@@ -181,6 +190,7 @@ const char* toString(backend::UniformType type) noexcept {
         case backend::UniformType::MAT4:   return "float4x4";
         case backend::UniformType::STRUCT: return "struct";
     }
+    return "--";
 }
 
 inline
@@ -193,6 +203,7 @@ const char* toString(backend::SamplerType type) noexcept {
         case backend::SamplerType::SAMPLER_EXTERNAL: return "samplerExternal";
         case backend::SamplerType::SAMPLER_CUBEMAP_ARRAY: return "samplerCubeArray";
     }
+    return "--";
 }
 
 inline
@@ -200,6 +211,7 @@ const char* toString(backend::SubpassType type) noexcept {
     switch (type) {
         case backend::SubpassType::SUBPASS_INPUT: return "subpassInput";
     }
+    return "--";
 }
 
 inline
@@ -210,6 +222,7 @@ const char* toString(backend::Precision precision) noexcept {
         case backend::Precision::HIGH: return "highp";
         case backend::Precision::DEFAULT: return "default";
     }
+    return "--";
 }
 
 inline
@@ -220,6 +233,7 @@ const char* toString(backend::SamplerFormat format) noexcept {
         case backend::SamplerFormat::FLOAT: return "float";
         case backend::SamplerFormat::SHADOW: return "shadow";
     }
+    return "--";
 }
 
 // Returns a human-readable variant description.

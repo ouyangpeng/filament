@@ -37,11 +37,11 @@ std::vector<Variant> determineSurfaceVariants(
                 filteredVariant, isLit || shadowMultiplier);
 
         if (filament::Variant::filterVariantVertex(filteredVariant) == variant) {
-            variants.emplace_back(variant, filament::backend::ShaderType::VERTEX);
+            variants.emplace_back(variant, filament::backend::ShaderStage::VERTEX);
         }
 
         if (filament::Variant::filterVariantFragment(filteredVariant) == variant) {
-            variants.emplace_back(variant, filament::backend::ShaderType::FRAGMENT);
+            variants.emplace_back(variant, filament::backend::ShaderStage::FRAGMENT);
         }
     }
     return variants;
@@ -53,9 +53,17 @@ std::vector<Variant> determinePostProcessVariants() {
     // opaque is needed)
     for (filament::Variant::type_t k = 0; k < filament::POST_PROCESS_VARIANT_COUNT; k++) {
         filament::Variant variant(k);
-        variants.emplace_back(variant, filament::backend::ShaderType::VERTEX);
-        variants.emplace_back(variant, filament::backend::ShaderType::FRAGMENT);
+        variants.emplace_back(variant, filament::backend::ShaderStage::VERTEX);
+        variants.emplace_back(variant, filament::backend::ShaderStage::FRAGMENT);
     }
+    return variants;
+}
+
+std::vector<Variant> determineComputeVariants() {
+    // TODO: should we have variants for compute shaders?
+    std::vector<Variant> variants;
+    filament::Variant variant(0);
+    variants.emplace_back(variant, filament::backend::ShaderStage::COMPUTE);
     return variants;
 }
 

@@ -16,22 +16,18 @@
 
 #include "filamat/MaterialBuilder.h"
 
-#include <atomic>
-#include <utility>
-#include <vector>
+#include <filamat/Enums.h>
 
-#include <utils/JobSystem.h>
-#include <utils/Log.h>
-#include <utils/Mutex.h>
-#include <utils/Panic.h>
-
-#include <private/filament/UniformInterfaceBlock.h>
-#include <private/filament/SamplerInterfaceBlock.h>
-#include <private/filament/UibStructs.h>
-
+#include "Includes.h"
+#include "MaterialVariants.h"
 #include "SibGenerator.h"
 
-#include "MaterialVariants.h"
+#ifndef FILAMAT_LITE
+#   include "GLSLPostProcessor.h"
+#   include "sca/GLSLTools.h"
+#else
+#   include "sca/GLSLToolsLite.h"
+#endif
 
 #include "shaders/MaterialInfo.h"
 #include "shaders/ShaderGenerator.h"
@@ -46,24 +42,30 @@
 #include "eiff/DictionaryTextChunk.h"
 #include "eiff/DictionarySpirvChunk.h"
 
-#include "Includes.h"
+#include <private/filament/BufferInterfaceBlock.h>
+#include <private/filament/SamplerInterfaceBlock.h>
+#include <private/filament/UibStructs.h>
 
-#ifndef FILAMAT_LITE
-#include "GLSLPostProcessor.h"
-#include "sca/GLSLTools.h"
-#else
-#include "sca/GLSLToolsLite.h"
-#endif
+#include <utils/JobSystem.h>
+#include <utils/Log.h>
+#include <utils/Mutex.h>
+#include <utils/Panic.h>
 
-using namespace utils;
+#include <atomic>
+#include <utility>
+#include <vector>
+
 
 namespace filamat {
+
+using namespace utils;
+using namespace filament;
 
 std::atomic<int> MaterialBuilderBase::materialBuilderClients(0);
 
 inline void assertSingleTargetApi(MaterialBuilderBase::TargetApi api) {
     // Assert that a single bit is set.
-    UTILS_UNUSED uint8_t bits = (uint8_t) api;
+    UTILS_UNUSED uint8_t bits = (uint8_t)api;
     assert(bits && !(bits & bits - 1u));
 }
 
@@ -82,7 +84,7 @@ void MaterialBuilderBase::prepare(bool vulkanSemantics) {
 
     // OpenGL is a special case. If we're doing any optimization, then we need to go to Spir-V.
     TargetLanguage glTargetLanguage = mOptimization > MaterialBuilder::Optimization::PREPROCESSOR ?
-            TargetLanguage::SPIRV : TargetLanguage::GLSL;
+                                      TargetLanguage::SPIRV : TargetLanguage::GLSL;
     if (vulkanSemantics) {
         // Currently GLSLPostProcessor.cpp is incapable of compiling SPIRV to GLSL without
         // running the optimizer. For now we just activate the optimizer in that case.
@@ -96,7 +98,7 @@ void MaterialBuilderBase::prepare(bool vulkanSemantics) {
     }
 
     // Build a list of codegen permutations, which is useful across all types of material builders.
-    static_assert(filament::backend::SHADER_MODEL_COUNT == 2);
+    static_assert(backend::SHADER_MODEL_COUNT == 2);
     for (const auto shaderModel: { ShaderModel::MOBILE, ShaderModel::DESKTOP }) {
         const auto i = static_cast<uint8_t>(shaderModel);
         if (!mShaderModels.test(i)) {
@@ -118,6 +120,8 @@ MaterialBuilder::MaterialBuilder() : mMaterialName("Unnamed") {
     std::fill_n(mProperties, MATERIAL_PROPERTIES_COUNT, false);
     mShaderModels.reset();
 }
+
+MaterialBuilder::~MaterialBuilder() = default;
 
 void MaterialBuilderBase::init() {
     materialBuilderClients++;
@@ -183,68 +187,59 @@ MaterialBuilder& MaterialBuilder::variable(Variable v, const char* name) noexcep
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::parameter(
-        UniformType type, ParameterPrecision precision, const char* name) noexcept {
-    ASSERT_POSTCONDITION(mParameterCount < MAX_PARAMETERS_COUNT, "Too many parameters");
-    mParameters[mParameterCount++] = { name, type, 1, precision };
-    return *this;
-}
-
-MaterialBuilder& MaterialBuilder::parameter(
-        UniformType type, size_t size, ParameterPrecision precision, const char* name) noexcept {
+MaterialBuilder& MaterialBuilder::parameter(const char* name, size_t size, UniformType type,
+        ParameterPrecision precision) noexcept {
     ASSERT_POSTCONDITION(mParameterCount < MAX_PARAMETERS_COUNT, "Too many parameters");
     mParameters[mParameterCount++] = { name, type, size, precision };
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::parameter(
-        SamplerType samplerType, SamplerFormat format, ParameterPrecision precision, const char* name) noexcept {
+MaterialBuilder& MaterialBuilder::parameter(const char* name, UniformType type,
+        ParameterPrecision precision) noexcept {
+    return parameter(name, 1, type, precision);
+}
+
+
+MaterialBuilder& MaterialBuilder::parameter(const char* name, SamplerType samplerType,
+        SamplerFormat format, ParameterPrecision precision) noexcept {
     ASSERT_POSTCONDITION(mParameterCount < MAX_PARAMETERS_COUNT, "Too many parameters");
     mParameters[mParameterCount++] = { name, samplerType, format, precision };
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::parameter(SubpassType subpassType, SamplerFormat format,
+MaterialBuilder& MaterialBuilder::parameter(const char* name, SamplerType samplerType,
+        ParameterPrecision precision) noexcept {
+    return parameter(name, samplerType, SamplerFormat::FLOAT, precision);
+}
+
+MaterialBuilder& MaterialBuilder::buffer(BufferInterfaceBlock bib) noexcept {
+    ASSERT_POSTCONDITION(mBuffers.size() < MAX_BUFFERS_COUNT, "Too many buffers");
+    mBuffers.emplace_back(std::make_unique<filament::BufferInterfaceBlock>(std::move(bib)));
+    return *this;
+}
+
+MaterialBuilder& MaterialBuilder::subpass(SubpassType subpassType, SamplerFormat format,
         ParameterPrecision precision, const char* name) noexcept {
     ASSERT_PRECONDITION(format == SamplerFormat::FLOAT,
             "Subpass parameters must have FLOAT format.");
 
-    auto subpassCount = std::count_if(std::begin(mParameters), std::end(mParameters),
-            [](const auto& p) { return p.isSubpass(); });
-
-    ASSERT_POSTCONDITION(subpassCount < MAX_SUBPASS_COUNT, "Too many subpasses");
-    ASSERT_POSTCONDITION(mParameterCount < MAX_PARAMETERS_COUNT, "Too many parameters");
-    mParameters[mParameterCount++] = { name, subpassType, format, precision };
+    ASSERT_POSTCONDITION(mSubpassCount < MAX_SUBPASS_COUNT, "Too many subpasses");
+    mSubpasses[mSubpassCount++] = { name, subpassType, format, precision };
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::parameter(
-        SamplerType samplerType, SamplerFormat format, const char* name) noexcept {
-    return parameter(samplerType, format, ParameterPrecision::DEFAULT, name);
-}
-
-MaterialBuilder& MaterialBuilder::parameter(
-        SamplerType samplerType, ParameterPrecision precision, const char* name) noexcept {
-    return parameter(samplerType, SamplerFormat::FLOAT, precision, name);
-}
-
-MaterialBuilder& MaterialBuilder::parameter(
-        SamplerType samplerType, const char* name) noexcept {
-    return parameter(samplerType, SamplerFormat::FLOAT, ParameterPrecision::DEFAULT, name);
-}
-
-MaterialBuilder& MaterialBuilder::parameter(SubpassType subpassType, SamplerFormat format,
+MaterialBuilder& MaterialBuilder::subpass(SubpassType subpassType, SamplerFormat format,
         const char* name) noexcept {
-    return parameter(subpassType, format, ParameterPrecision::DEFAULT, name);
+    return subpass(subpassType, format, ParameterPrecision::DEFAULT, name);
 }
 
-MaterialBuilder& MaterialBuilder::parameter(SubpassType subpassType, ParameterPrecision precision,
+MaterialBuilder& MaterialBuilder::subpass(SubpassType subpassType, ParameterPrecision precision,
         const char* name) noexcept {
-    return parameter(subpassType, SamplerFormat::FLOAT, precision, name);
+    return subpass(subpassType, SamplerFormat::FLOAT, precision, name);
 }
 
-MaterialBuilder& MaterialBuilder::parameter(SubpassType subpassType, const char* name) noexcept {
-    return parameter(subpassType, SamplerFormat::FLOAT, ParameterPrecision::DEFAULT, name);
+MaterialBuilder& MaterialBuilder::subpass(SubpassType subpassType, const char* name) noexcept {
+    return subpass(subpassType, SamplerFormat::FLOAT, ParameterPrecision::DEFAULT, name);
 }
 
 MaterialBuilder& MaterialBuilder::require(VertexAttribute attribute) noexcept {
@@ -252,8 +247,20 @@ MaterialBuilder& MaterialBuilder::require(VertexAttribute attribute) noexcept {
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::materialDomain(filament::MaterialDomain materialDomain) noexcept {
+MaterialBuilder& MaterialBuilder::groupSize(filament::math::uint3 groupSize) noexcept {
+    mGroupSize = groupSize;
+    return *this;
+}
+
+MaterialBuilder& MaterialBuilder::materialDomain(
+        MaterialBuilder::MaterialDomain materialDomain) noexcept {
     mMaterialDomain = materialDomain;
+    if (mMaterialDomain == MaterialDomain::COMPUTE) {
+        // compute implies feature level 2
+        if (mFeatureLevel < FeatureLevel::FEATURE_LEVEL_2) {
+            mFeatureLevel = FeatureLevel::FEATURE_LEVEL_2;
+        }
+    }
     return *this;
 }
 
@@ -416,7 +423,7 @@ MaterialBuilder& MaterialBuilder::generateDebugInfo(bool generateDebugInfo) noex
     return *this;
 }
 
-MaterialBuilder& MaterialBuilder::variantFilter(filament::UserVariantFilterMask variantFilter) noexcept {
+MaterialBuilder& MaterialBuilder::variantFilter(UserVariantFilterMask variantFilter) noexcept {
     mVariantFilter = variantFilter;
     return *this;
 }
@@ -440,24 +447,33 @@ void MaterialBuilder::prepareToBuild(MaterialInfo& info) noexcept {
     MaterialBuilderBase::prepare(mEnableFramebufferFetch);
 
     // Build the per-material sampler block and uniform block.
-    filament::SamplerInterfaceBlock::Builder sbb;
-    filament::UniformInterfaceBlock::Builder ibb;
+    SamplerInterfaceBlock::Builder sbb;
+    BufferInterfaceBlock::Builder ibb;
     for (size_t i = 0, c = mParameterCount; i < c; i++) {
         auto const& param = mParameters[i];
+        assert_invariant(!param.isSubpass());
         if (param.isSampler()) {
             sbb.add({ param.name.data(), param.name.size() },
                     param.samplerType, param.format, param.precision);
         } else if (param.isUniform()) {
             ibb.add({{{ param.name.data(), param.name.size() },
                       uint32_t(param.size == 1u ? 0u : param.size), param.uniformType, param.precision }});
-        } else if (param.isSubpass()) {
-            // For now, we only support a single subpass for attachment 0.
-            // Subpasses belong to the "MaterialParams" block.
-            const uint8_t attachmentIndex = 0;
-            const uint8_t binding = 0;
-            info.subpass = { utils::CString("MaterialParams"), param.name, param.subpassType,
-                param.format, param.precision, attachmentIndex, binding };
         }
+    }
+
+    for (size_t i = 0, c = mSubpassCount; i < c; i++) {
+        auto const& param = mSubpasses[i];
+        assert_invariant(param.isSubpass());
+        // For now, we only support a single subpass for attachment 0.
+        // Subpasses belong to the "MaterialParams" block.
+        const uint8_t attachmentIndex = 0;
+        const uint8_t binding = 0;
+        info.subpass = { CString("MaterialParams"), param.name, param.subpassType,
+                         param.format, param.precision, attachmentIndex, binding };
+    }
+
+    for (auto const& buffer : mBuffers) {
+        info.buffers.emplace_back(buffer.get());
     }
 
     if (mSpecularAntiAliasing) {
@@ -475,9 +491,9 @@ void MaterialBuilder::prepareToBuild(MaterialInfo& info) noexcept {
         ibb.add({{ "_doubleSided", 0, UniformType::BOOL }});
     }
 
-    mRequiredAttributes.set(filament::VertexAttribute::POSITION);
-    if (mShading != filament::Shading::UNLIT || mShadowMultiplier) {
-        mRequiredAttributes.set(filament::VertexAttribute::TANGENTS);
+    mRequiredAttributes.set(VertexAttribute::POSITION);
+    if (mShading != Shading::UNLIT || mShadowMultiplier) {
+        mRequiredAttributes.set(VertexAttribute::TANGENTS);
     }
 
     info.sib = sbb.name("MaterialParams").build();
@@ -508,9 +524,10 @@ void MaterialBuilder::prepareToBuild(MaterialInfo& info) noexcept {
     info.instanced = mInstanced;
     info.vertexDomainDeviceJittered = mVertexDomainDeviceJittered;
     info.featureLevel = mFeatureLevel;
+    info.groupSize = mGroupSize;
 }
 
-bool MaterialBuilder::findProperties(filament::backend::ShaderType type,
+bool MaterialBuilder::findProperties(backend::ShaderStage type,
         MaterialBuilder::PropertyList& allProperties) noexcept {
 #ifndef FILAMAT_LITE
     GLSLTools glslTools;
@@ -533,7 +550,7 @@ bool MaterialBuilder::findAllProperties() noexcept {
         return true;
     }
 
-    using namespace filament::backend;
+    using namespace backend;
 
 #ifndef FILAMAT_LITE
     // Some fields in MaterialInputs only exist if the property is set (e.g: normal, subsurface
@@ -541,16 +558,18 @@ bool MaterialBuilder::findAllProperties() noexcept {
     // static code analyse the AST.
     MaterialBuilder::PropertyList allProperties;
     std::fill_n(allProperties, MATERIAL_PROPERTIES_COUNT, true);
-
-    findProperties(ShaderType::FRAGMENT, allProperties);
-    findProperties(ShaderType::VERTEX, allProperties);
-
+    if (!findProperties(ShaderStage::FRAGMENT, allProperties)) {
+        return false;
+    }
+    if (!findProperties(ShaderStage::VERTEX, allProperties)) {
+        return false;
+    }
     return true;
 #else
     GLSLToolsLite glslTools;
-    if (glslTools.findProperties(ShaderType::FRAGMENT, mMaterialFragmentCode.getResolved(), mProperties)) {
+    if (glslTools.findProperties(ShaderStage::FRAGMENT, mMaterialFragmentCode.getResolved(), mProperties)) {
         return glslTools.findProperties(
-                ShaderType::VERTEX, mMaterialVertexCode.getResolved(), mProperties);
+                ShaderStage::VERTEX, mMaterialVertexCode.getResolved(), mProperties);
     }
     return false;
 #endif
@@ -558,7 +577,7 @@ bool MaterialBuilder::findAllProperties() noexcept {
 
 bool MaterialBuilder::runSemanticAnalysis(MaterialInfo const& info) noexcept {
 #ifndef FILAMAT_LITE
-    using namespace filament::backend;
+    using namespace backend;
     GLSLTools glslTools;
 
     TargetApi targetApi = mSemanticCodeGenParams.targetApi;
@@ -570,15 +589,22 @@ bool MaterialBuilder::runSemanticAnalysis(MaterialInfo const& info) noexcept {
         targetApi = TargetApi::VULKAN;
     }
 
-    ShaderModel model = static_cast<ShaderModel>(mSemanticCodeGenParams.shaderModel);
-    std::string shaderCode = peek(ShaderType::VERTEX, mSemanticCodeGenParams, mProperties);
-    bool result = glslTools.analyzeVertexShader(shaderCode, model, mMaterialDomain,
-            targetApi, targetLanguage, info);
-    if (!result) return false;
-
-    shaderCode = peek(ShaderType::FRAGMENT, mSemanticCodeGenParams, mProperties);
-    result = glslTools.analyzeFragmentShader(shaderCode, model, mMaterialDomain,
-            targetApi, targetLanguage, mCustomSurfaceShading, info);
+    bool result = false;
+    ShaderModel model = mSemanticCodeGenParams.shaderModel;
+    if (mMaterialDomain == filament::MaterialDomain::COMPUTE) {
+        std::string shaderCode = peek(ShaderStage::COMPUTE, mSemanticCodeGenParams, mProperties);
+        result = GLSLTools::analyzeComputeShader(shaderCode, model,
+                targetApi, targetLanguage, info);
+    } else {
+        std::string shaderCode = peek(ShaderStage::VERTEX, mSemanticCodeGenParams, mProperties);
+        result = GLSLTools::analyzeVertexShader(shaderCode, model, mMaterialDomain,
+                targetApi, targetLanguage, info);
+        if (result) {
+            shaderCode = peek(ShaderStage::FRAGMENT, mSemanticCodeGenParams, mProperties);
+            result = GLSLTools::analyzeFragmentShader(shaderCode, model, mMaterialDomain,
+                    targetApi, targetLanguage, mCustomSurfaceShading, info);
+        }
+    }
     return result;
 #else
     return true;
@@ -588,16 +614,16 @@ bool MaterialBuilder::runSemanticAnalysis(MaterialInfo const& info) noexcept {
 bool MaterialBuilder::checkLiteRequirements() noexcept {
 #ifdef FILAMAT_LITE
     if (mTargetApi != TargetApi::OPENGL) {
-        utils::slog.e
+        slog.e
                 << "Filamat lite only supports building materials for the OpenGL backend."
-                << utils::io::endl;
+                << io::endl;
         return false;
     }
 
     if (mOptimization != Optimization::NONE) {
-        utils::slog.e
-                << "Filamat lite does not support material optimization." << utils::io::endl
-                << "Ensure optimization is set to NONE." << utils::io::endl;
+        slog.e
+                << "Filamat lite does not support material optimization." << io::endl
+                << "Ensure optimization is set to NONE." << io::endl;
         return false;
     }
 #endif
@@ -605,17 +631,17 @@ bool MaterialBuilder::checkLiteRequirements() noexcept {
 }
 
 bool MaterialBuilder::ShaderCode::resolveIncludes(IncludeCallback callback,
-        const utils::CString& fileName) noexcept {
+        const CString& fileName) noexcept {
     if (!mCode.empty()) {
         ResolveOptions options {
-            .insertLineDirectives = true,
-            .insertLineDirectiveCheck = true
+                .insertLineDirectives = true,
+                .insertLineDirectiveCheck = true
         };
         IncludeResult source {
-            .includeName = fileName,
-            .text = mCode,
-            .lineNumberOffset = getLineOffset(),
-            .name = utils::CString("")
+                .includeName = fileName,
+                .text = mCode,
+                .lineNumberOffset = getLineOffset(),
+                .name = CString("")
         };
         if (!::filamat::resolveIncludes(source, std::move(callback), options)) {
             return false;
@@ -628,17 +654,17 @@ bool MaterialBuilder::ShaderCode::resolveIncludes(IncludeCallback callback,
 }
 
 static void showErrorMessage(const char* materialName, filament::Variant variant,
-        MaterialBuilder::TargetApi targetApi, filament::backend::ShaderType shaderType,
+        MaterialBuilder::TargetApi targetApi, backend::ShaderStage shaderType,
         const std::string& shaderCode) {
-    using ShaderType = filament::backend::ShaderType;
+    using ShaderStage = backend::ShaderStage;
     using TargetApi = MaterialBuilder::TargetApi;
-    utils::slog.e
+    slog.e
             << "Error in \"" << materialName << "\""
             << ", Variant 0x" << io::hex << +variant.key
             << (targetApi == TargetApi::VULKAN ? ", Vulkan.\n" : ", OpenGL.\n")
             << "=========================\n"
             << "Generated "
-            << (shaderType == ShaderType::VERTEX ? "Vertex Shader\n" : "Fragment Shader\n")
+            << (shaderType == ShaderStage::VERTEX ? "Vertex Shader\n" : "Fragment Shader\n")
             << "=========================\n"
             << shaderCode;
 }
@@ -724,22 +750,22 @@ bool MaterialBuilder::generateShaders(JobSystem& jobSystem, const std::vector<Va
                 // directives are optimized away when using the full filamat, so down below we
                 // explicitly remove them when using filamat lite.
                 std::string shader;
-                if (v.stage == filament::backend::ShaderType::VERTEX) {
+                if (v.stage == backend::ShaderStage::VERTEX) {
                     shader = sg.createVertexProgram(
                             shaderModel, targetApi, targetLanguage, info, v.variant,
                             mInterpolation, mVertexDomain);
-#ifdef FILAMAT_LITE
-                    GLSLToolsLite glslTools;
-                    glslTools.removeGoogleLineDirectives(shader);
-#endif
-                } else if (v.stage == filament::backend::ShaderType::FRAGMENT) {
+                } else if (v.stage == backend::ShaderStage::FRAGMENT) {
                     shader = sg.createFragmentProgram(
                             shaderModel, targetApi, targetLanguage, info, v.variant, mInterpolation);
-#ifdef FILAMAT_LITE
-                    GLSLToolsLite glslTools;
-                    glslTools.removeGoogleLineDirectives(shader);
-#endif
+                } else if (v.stage == backend::ShaderStage::COMPUTE) {
+                    shader = sg.createComputeProgram(
+                            shaderModel, targetApi, targetLanguage, info, v.variant);
                 }
+
+#ifdef FILAMAT_LITE
+                GLSLToolsLite glslTools;
+                glslTools.removeGoogleLineDirectives(shader);
+#endif
 
                 std::string* pGlsl = nullptr;
                 if (targetApiNeedsGlsl) {
@@ -753,6 +779,7 @@ bool MaterialBuilder::generateShaders(JobSystem& jobSystem, const std::vector<Va
                         .targetLanguage = targetLanguage,
                         .shaderType = v.stage,
                         .shaderModel = shaderModel,
+                        .featureLevel = mFeatureLevel,
                         .domain = mMaterialDomain,
                         .materialInfo = &info,
                         .hasFramebufferFetch = mEnableFramebufferFetch,
@@ -781,33 +808,39 @@ bool MaterialBuilder::generateShaders(JobSystem& jobSystem, const std::vector<Va
 
                 // NOTE: Everything below touches shared structures protected by a lock
                 // NOTE: do not execute expensive work from here on!
-                std::unique_lock<utils::Mutex> lock(entriesLock);
+                std::unique_lock<Mutex> lock(entriesLock);
 
-                if (targetApi == TargetApi::OPENGL) {
-                    glslEntry.stage = v.stage;
-                    glslEntry.shader = shader;
+                // below we rely on casting ShaderStage to uint8_t
+                static_assert(sizeof(filament::backend::ShaderStage) == 1);
 
-                    glslEntries.push_back(glslEntry);
-                }
 
+                switch (targetApi) {
+                    case TargetApi::ALL:
+                        // should never happen
+                        break;
+                    case TargetApi::OPENGL:
+                        glslEntry.stage = uint8_t(v.stage);
+                        glslEntry.shader = shader;
+                        glslEntries.push_back(glslEntry);
+                        break;
+                    case TargetApi::VULKAN:
 #ifndef FILAMAT_LITE
-                if (targetApi == TargetApi::VULKAN) {
-                    assert(!spirv.empty());
-                    spirvEntry.stage = v.stage;
-                    spirvEntry.spirv = std::move(spirv);
-
-                    spirvEntries.push_back(spirvEntry);
-                }
-
-                if (targetApi == TargetApi::METAL) {
-                    assert(!spirv.empty());
-                    assert(msl.length() > 0);
-                    metalEntry.stage = v.stage;
-                    metalEntry.shader = msl;
-
-                    metalEntries.push_back(metalEntry);
-                }
+                        assert(!spirv.empty());
+                        spirvEntry.stage = uint8_t(v.stage);
+                        spirvEntry.spirv = std::move(spirv);
+                        spirvEntries.push_back(spirvEntry);
 #endif
+                        break;
+                    case TargetApi::METAL:
+#ifndef FILAMAT_LITE
+                        assert(!spirv.empty());
+                        assert(msl.length() > 0);
+                        metalEntry.stage = uint8_t(v.stage);
+                        metalEntry.shader = msl;
+                        metalEntries.push_back(metalEntry);
+#endif
+                        break;
+                }
             });
 
             // NOTE: We run the first job separately to work the lack of thread safety
@@ -941,10 +974,11 @@ MaterialBuilder& MaterialBuilder::useLegacyMorphing() noexcept {
 }
 
 Package MaterialBuilder::build(JobSystem& jobSystem) noexcept {
+    bool success;
     if (materialBuilderClients == 0) {
-        utils::slog.e << "Error: MaterialBuilder::init() must be called before build()."
-            << utils::io::endl;
+        slog.e << "Error: MaterialBuilder::init() must be called before build()." << io::endl;
         // Return an empty package to signal a failure to build the material.
+error:
         return Package::invalidPackage();
     }
 
@@ -953,30 +987,47 @@ Package MaterialBuilder::build(JobSystem& jobSystem) noexcept {
         output(VariableQualifier::OUT, OutputTarget::COLOR, OutputType::FLOAT4, "color");
     }
 
+    // TODO: maybe check MaterialDomain::COMPUTE has outputs
+
     // Resolve all the #include directives within user code.
     if (!mMaterialFragmentCode.resolveIncludes(mIncludeCallback, mFileName) ||
         !mMaterialVertexCode.resolveIncludes(mIncludeCallback, mFileName)) {
-        return Package::invalidPackage();
+        goto error;
     }
 
     if (mCustomSurfaceShading && mShading != Shading::LIT) {
-        utils::slog.e << "Error: customSurfaceShading can only be used with lit materials."
-                      << utils::io::endl;
-        return Package::invalidPackage();
+        slog.e << "Error: customSurfaceShading can only be used with lit materials." << io::endl;
+        goto error;
     }
 
     // prepareToBuild must be called first, to populate mCodeGenPermutations.
     MaterialInfo info{};
     prepareToBuild(info);
 
-    // Run checks, in order.
-    // The call to findProperties populates mProperties and must come before runSemanticAnalysis.
-    if (!checkLiteRequirements() || !findAllProperties() || !runSemanticAnalysis(info)) {
-        // Return an empty package to signal a failure to build the material.
-        return Package::invalidPackage();
+    // check level features
+    if (!checkMaterialLevelFeatures(info)) {
+        goto error;
     }
 
-    info.samplerBindings.init(mMaterialDomain, &info.sib, mMaterialName.c_str());
+    // Run checks, in order.
+    // The call to findProperties populates mProperties and must come before runSemanticAnalysis.
+    // Return an empty package to signal a failure to build the material.
+
+#ifdef FILAMAT_LITE
+    if (!checkLiteRequirements()) {
+        goto error;
+    }
+#endif
+
+    if (!findAllProperties()) {
+        goto error;
+    }
+
+    if (!runSemanticAnalysis(info)) {
+        goto error;
+    }
+
+    info.samplerBindings.init(mMaterialDomain, info.sib);
 
     // Create chunk tree.
     ChunkContainer container;
@@ -988,22 +1039,97 @@ Package MaterialBuilder::build(JobSystem& jobSystem) noexcept {
     info.useLegacyMorphing = mUseLegacyMorphing;
 
     // Generate all shaders and write the shader chunks.
-    const auto variants = mMaterialDomain == MaterialDomain::SURFACE ?
-        determineSurfaceVariants(mVariantFilter, isLit(), mShadowMultiplier) :
-        determinePostProcessVariants();
-    bool success = generateShaders(jobSystem, variants, container, info);
 
+    std::vector<Variant> variants;
+    switch (mMaterialDomain) {
+        case MaterialDomain::SURFACE:
+            variants = determineSurfaceVariants(mVariantFilter, isLit(), mShadowMultiplier);
+            break;
+        case MaterialDomain::POST_PROCESS:
+            variants = determinePostProcessVariants();
+            break;
+        case MaterialDomain::COMPUTE:
+            variants = determineComputeVariants();
+            break;
+    }
+
+    success = generateShaders(jobSystem, variants, container, info);
     if (!success) {
         // Return an empty package to signal a failure to build the material.
-        return Package::invalidPackage();
+        goto error;
     }
 
     // Flatten all chunks in the container into a Package.
     Package package(container.getSize());
-    Flattener f(package);
+    Flattener f{ package.getData() };
     container.flatten(f);
 
     return package;
+}
+
+using namespace backend;
+static const char* to_string(ShaderStageFlags stageFlags) noexcept {
+    switch (stageFlags) {
+        case ShaderStageFlags::NONE:                    return "{ }";
+        case ShaderStageFlags::VERTEX:                  return "{ vertex }";
+        case ShaderStageFlags::FRAGMENT:                return "{ fragment }";
+        case ShaderStageFlags::COMPUTE:                 return "{ compute }";
+        case ShaderStageFlags::ALL_SHADER_STAGE_FLAGS:  return "{ vertex | fragment | COMPUTE }";
+    }
+    return nullptr;
+}
+
+bool MaterialBuilder::checkMaterialLevelFeatures(MaterialInfo const& info) const noexcept {
+
+    auto logSamplerOverflow = [](SamplerInterfaceBlock const& sib) {
+        auto const& samplers = sib.getSamplerInfoList();
+        auto const* stage = to_string(sib.getStageFlags());
+        for (auto const& sampler: samplers) {
+            slog.e << "\"" << sampler.name.c_str() << "\" "
+                   << Enums::toString(sampler.type).c_str() << " " << stage << '\n';
+        }
+        flush(slog.e);
+    };
+
+    const auto userSamplerCount = info.sib.getSize();
+    switch (info.featureLevel) {
+        case FeatureLevel::FEATURE_LEVEL_1:
+        case FeatureLevel::FEATURE_LEVEL_2: {
+            // TODO: we need constants somewhere for these values
+            if (userSamplerCount > 9) {
+                slog.e << "Error: material \"" << mMaterialName.c_str()
+                       << "\" has feature level " << +info.featureLevel
+                       << " and is using more than 9 samplers." << io::endl;
+                logSamplerOverflow(info.sib);
+                return false;
+            }
+            auto const& samplerList = info.sib.getSamplerInfoList();
+            using SamplerInfo = SamplerInterfaceBlock::SamplerInfo;
+            if (std::any_of(samplerList.begin(), samplerList.end(),
+                    [](const SamplerInfo& sampler) {
+                        return sampler.type == SamplerType::SAMPLER_CUBEMAP_ARRAY;
+                    })) {
+                slog.e << "Error: material \"" << mMaterialName.c_str()
+                       << "\" has feature level " << +info.featureLevel
+                       << " and uses a samplerCubemapArray." << io::endl;
+                logSamplerOverflow(info.sib);
+                return false;
+            }
+            break;
+        }
+        case FeatureLevel::FEATURE_LEVEL_3: {
+            // TODO: we need constants somewhere for these values
+            if (userSamplerCount > 12) {
+                slog.e << "Error: material \"" << mMaterialName.c_str()
+                       << "\" has feature level " << +info.featureLevel
+                       << " and is using more than 12 samplers" << io::endl;
+                logSamplerOverflow(info.sib);
+                return false;
+            }
+            break;
+        }
+    }
+    return true;
 }
 
 bool MaterialBuilder::hasCustomVaryings() const noexcept {
@@ -1025,46 +1151,57 @@ bool MaterialBuilder::needsStandardDepthProgram() const noexcept {
              mBlendingMode == BlendingMode::FADE));
 }
 
-std::string MaterialBuilder::peek(filament::backend::ShaderType type,
+std::string MaterialBuilder::peek(backend::ShaderStage stage,
         const CodeGenParams& params, const PropertyList& properties) noexcept {
 
-    ShaderGenerator sg(properties, mVariables, mOutputs, mDefines, mMaterialFragmentCode.getResolved(),
-            mMaterialFragmentCode.getLineOffset(), mMaterialVertexCode.getResolved(),
-            mMaterialVertexCode.getLineOffset(), mMaterialDomain);
+    ShaderGenerator sg(properties, mVariables, mOutputs, mDefines,
+            mMaterialFragmentCode.getResolved(), mMaterialFragmentCode.getLineOffset(),
+            mMaterialVertexCode.getResolved(), mMaterialVertexCode.getLineOffset(),
+            mMaterialDomain);
 
     MaterialInfo info;
     prepareToBuild(info);
-    info.samplerBindings.init(mMaterialDomain, &info.sib, mMaterialName.c_str());
+    info.samplerBindings.init(mMaterialDomain, info.sib);
 
-    if (type == filament::backend::ShaderType::VERTEX) {
-        return sg.createVertexProgram(ShaderModel(params.shaderModel),
-                params.targetApi, params.targetLanguage, info, {}, mInterpolation, mVertexDomain);
-    } else {
-        return sg.createFragmentProgram(ShaderModel(params.shaderModel), params.targetApi,
-                params.targetLanguage, info, {}, mInterpolation);
+    switch (stage) {
+        case backend::ShaderStage::VERTEX:
+            return sg.createVertexProgram(
+                    params.shaderModel, params.targetApi, params.targetLanguage,
+                    info, {}, mInterpolation, mVertexDomain);
+        case backend::ShaderStage::FRAGMENT:
+            return sg.createFragmentProgram(
+                    params.shaderModel, params.targetApi, params.targetLanguage,
+                    info, {}, mInterpolation);
+        case backend::ShaderStage::COMPUTE:
+            return sg.createComputeProgram(
+                    params.shaderModel, params.targetApi, params.targetLanguage,
+                    info, {});
     }
 }
 
 void MaterialBuilder::writeCommonChunks(ChunkContainer& container, MaterialInfo& info) const noexcept {
-    container.addSimpleChild<uint32_t>(ChunkType::MaterialVersion, filament::MATERIAL_VERSION);
+    container.addSimpleChild<uint32_t>(ChunkType::MaterialVersion, MATERIAL_VERSION);
     container.addSimpleChild<uint8_t>(ChunkType::MaterialFeatureLevel, (uint8_t)mFeatureLevel);
     container.addSimpleChild<const char*>(ChunkType::MaterialName, mMaterialName.c_str_safe());
     container.addSimpleChild<uint32_t>(ChunkType::MaterialShaderModels, mShaderModels.getValue());
     container.addSimpleChild<uint8_t>(ChunkType::MaterialDomain, static_cast<uint8_t>(mMaterialDomain));
 
-    // note: this chunk is only needed for OpenGL backends, which don't all support layout(binding=)
     using namespace filament;
-    utils::FixedCapacityVector<std::pair<std::string_view, UniformBindingPoints>> list = {
-            { PerViewUib::_name,               UniformBindingPoints::PER_VIEW },
-            { PerRenderableUib::_name,         UniformBindingPoints::PER_RENDERABLE },
-            { LightsUib::_name,                UniformBindingPoints::LIGHTS },
-            { ShadowUib::_name,                UniformBindingPoints::SHADOW },
-            { FroxelRecordUib::_name,          UniformBindingPoints::FROXEL_RECORDS },
-            { PerRenderableBoneUib::_name,     UniformBindingPoints::PER_RENDERABLE_BONES },
-            { PerRenderableMorphingUib::_name, UniformBindingPoints::PER_RENDERABLE_MORPHING },
-            { info.uib.getName(),              UniformBindingPoints::PER_MATERIAL_INSTANCE }
-    };
-    container.addChild<MaterialUniformBlockBindingsChunk>(std::move(list));
+
+    if (info.featureLevel <= FeatureLevel::FEATURE_LEVEL_1) {
+        // note: this chunk is only needed for OpenGL backends, which don't all support layout(binding=)
+        FixedCapacityVector<std::pair<std::string_view, UniformBindingPoints>> list = {
+                { PerViewUib::_name,               UniformBindingPoints::PER_VIEW },
+                { PerRenderableUib::_name,         UniformBindingPoints::PER_RENDERABLE },
+                { LightsUib::_name,                UniformBindingPoints::LIGHTS },
+                { ShadowUib::_name,                UniformBindingPoints::SHADOW },
+                { FroxelRecordUib::_name,          UniformBindingPoints::FROXEL_RECORDS },
+                { PerRenderableBoneUib::_name,     UniformBindingPoints::PER_RENDERABLE_BONES },
+                { PerRenderableMorphingUib::_name, UniformBindingPoints::PER_RENDERABLE_MORPHING },
+                { info.uib.getName(),              UniformBindingPoints::PER_MATERIAL_INSTANCE }
+        };
+        container.addChild<MaterialUniformBlockBindingsChunk>(std::move(list));
+    }
 
     // note: this chunk is needed for Vulkan and GL backends. Metal shouldn't need it (but
     // still does as of now).
@@ -1076,30 +1213,35 @@ void MaterialBuilder::writeCommonChunks(ChunkContainer& container, MaterialInfo&
     // User Material SIB
     container.addChild<MaterialSamplerInterfaceBlockChunk>(info.sib);
 
-    // User Subpass
-    container.addChild<MaterialSubpassInterfaceBlockChunk>(info.subpass);
+    // TODO: should we write the SSBO info? this would only be needed if we wanted to provide
+    //       an interface to set [get?] values in the buffer. But we can do that easily
+    //       with a c-struct (what about kotlin/java?). tbd.
 
+    if (mMaterialDomain != MaterialDomain::COMPUTE) {
+        // User Subpass
+        container.addChild<MaterialSubpassInterfaceBlockChunk>(info.subpass);
 
-    container.addSimpleChild<bool>(ChunkType::MaterialDoubleSidedSet, mDoubleSidedCapability);
-    container.addSimpleChild<bool>(ChunkType::MaterialDoubleSided, mDoubleSided);
-    container.addSimpleChild<uint8_t>(ChunkType::MaterialBlendingMode, static_cast<uint8_t>(mBlendingMode));
-    container.addSimpleChild<uint8_t>(ChunkType::MaterialTransparencyMode, static_cast<uint8_t>(mTransparencyMode));
-    container.addSimpleChild<uint8_t>(ChunkType::MaterialReflectionMode, static_cast<uint8_t>(mReflectionMode));
-    container.addSimpleChild<bool>(ChunkType::MaterialDepthWriteSet, mDepthWriteSet);
-    container.addSimpleChild<bool>(ChunkType::MaterialColorWrite, mColorWrite);
-    container.addSimpleChild<bool>(ChunkType::MaterialDepthWrite, mDepthWrite);
-    container.addSimpleChild<bool>(ChunkType::MaterialDepthTest, mDepthTest);
-    container.addSimpleChild<bool>(ChunkType::MaterialInstanced, mInstanced);
-    container.addSimpleChild<uint8_t>(ChunkType::MaterialCullingMode, static_cast<uint8_t>(mCullingMode));
+        container.addSimpleChild<bool>(ChunkType::MaterialDoubleSidedSet, mDoubleSidedCapability);
+        container.addSimpleChild<bool>(ChunkType::MaterialDoubleSided, mDoubleSided);
+        container.addSimpleChild<uint8_t>(ChunkType::MaterialBlendingMode, static_cast<uint8_t>(mBlendingMode));
+        container.addSimpleChild<uint8_t>(ChunkType::MaterialTransparencyMode, static_cast<uint8_t>(mTransparencyMode));
+        container.addSimpleChild<uint8_t>(ChunkType::MaterialReflectionMode, static_cast<uint8_t>(mReflectionMode));
+        container.addSimpleChild<bool>(ChunkType::MaterialDepthWriteSet, mDepthWriteSet);
+        container.addSimpleChild<bool>(ChunkType::MaterialColorWrite, mColorWrite);
+        container.addSimpleChild<bool>(ChunkType::MaterialDepthWrite, mDepthWrite);
+        container.addSimpleChild<bool>(ChunkType::MaterialDepthTest, mDepthTest);
+        container.addSimpleChild<bool>(ChunkType::MaterialInstanced, mInstanced);
+        container.addSimpleChild<uint8_t>(ChunkType::MaterialCullingMode, static_cast<uint8_t>(mCullingMode));
 
-    uint64_t properties = 0;
-    UTILS_NOUNROLL
-    for (size_t i = 0; i < MATERIAL_PROPERTIES_COUNT; i++) {
-        if (mProperties[i]) {
-            properties |= uint64_t(1u) << i;
+        uint64_t properties = 0;
+        UTILS_NOUNROLL
+        for (size_t i = 0; i < MATERIAL_PROPERTIES_COUNT; i++) {
+            if (mProperties[i]) {
+                properties |= uint64_t(1u) << i;
+            }
         }
+        container.addSimpleChild<uint64_t>(ChunkType::MaterialProperties, properties);
     }
-    container.addSimpleChild<uint64_t>(ChunkType::MaterialProperties, properties);
 }
 
 void MaterialBuilder::writeSurfaceChunks(ChunkContainer& container) const noexcept {

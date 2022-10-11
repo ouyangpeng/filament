@@ -17,7 +17,7 @@
 #ifndef TNT_FILAMENT_DETAILS_ENGINE_H
 #define TNT_FILAMENT_DETAILS_ENGINE_H
 
-#include "upcast.h"
+#include "downcast.h"
 
 #include "Allocators.h"
 #include "DFG.h"
@@ -45,7 +45,7 @@
 #include "private/backend/DriverApi.h"
 
 #include <private/filament/EngineEnums.h>
-#include <private/filament/UniformInterfaceBlock.h>
+#include <private/filament/BufferInterfaceBlock.h>
 
 #include <filament/ColorGrading.h>
 #include <filament/Engine.h>
@@ -370,8 +370,8 @@ public:
     size_t getRequestedDriverHandleArenaSize() const noexcept { return mConfig.driverHandleArenaSizeMB * MiB; }
     Config const& getConfig() const noexcept { return mConfig; }
 
-    bool hasFeatureLevel(backend::FeatureLevel featureLevel) const noexcept {
-        return featureLevel <= mActiveFeatureLevel;
+    bool hasFeatureLevel(backend::FeatureLevel neededFeatureLevel) const noexcept {
+        return FEngine::getActiveFeatureLevel() >= neededFeatureLevel;
     }
 
 private:
@@ -497,7 +497,6 @@ public:
         struct {
             bool far_uses_shadowcasters = true;
             bool focus_shadowcasters = true;
-            bool lispsm = true;
             bool visualize_cascades = false;
             bool tightly_bound_scene = true;
             float dzn = -1.0f;
@@ -520,7 +519,7 @@ public:
     } debug;
 };
 
-FILAMENT_UPCAST(Engine)
+FILAMENT_DOWNCAST(Engine)
 
 } // namespace filament
 

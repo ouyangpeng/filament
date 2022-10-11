@@ -18,11 +18,7 @@
 
 #include <filamentapp/FilamentApp.h>
 
-#if !defined(WIN32)
-#if defined(FILAMENT_SUPPORTS_WAYLAND)
-#    include <SDL_syswm.h>
-#endif
-#else
+#if defined(WIN32)
 #    include <SDL_syswm.h>
 #    include <utils/unwindows.h>
 #endif
@@ -401,11 +397,7 @@ void FilamentApp::run(const Config& config, SetupCallback setupCallback,
         Renderer* renderer = window->getRenderer();
 
         if (preRender) {
-            for (auto const& view : window->mViews) {
-                if (view.get() != window->mUiView) {
-                    preRender(mEngine, view->getView(), mScene, renderer);
-                }
-            }
+            preRender(mEngine, window->mViews[0]->getView(), mScene, renderer);
         }
 
         if (renderer->beginFrame(window->getSwapChain())) {
@@ -416,11 +408,7 @@ void FilamentApp::run(const Config& config, SetupCallback setupCallback,
                 renderer->render(view->getView());
             }
             if (postRender) {
-                for (auto const& view : window->mViews) {
-                    if (view.get() != window->mUiView) {
-                        postRender(mEngine, view->getView(), mScene, renderer);
-                    }
-                }
+                postRender(mEngine, window->mViews[0]->getView(), mScene, renderer);
             }
             renderer->endFrame();
 
@@ -549,33 +537,13 @@ FilamentApp::Window::Window(FilamentApp* filamentApp,
         mHeight = h;
     } else {
 
-#if defined(FILAMENT_SUPPORTS_WAYLAND)
-        struct {
-            struct wl_display *display;
-            struct wl_surface *surface;
-        } wayland{};
-
-        SDL_SysWMinfo wmi;
-        SDL_VERSION(&wmi.version);
-        ASSERT_POSTCONDITION(SDL_GetWindowWMInfo(mWindow, &wmi), "SDL version unsupported!");
-        if (wmi.subsystem == SDL_SYSWM_WAYLAND) {
-            wayland.display = wmi.info.wl.display;
-            wayland.surface = wmi.info.wl.surface;
-        }
-        void* nativeWindow = &wayland;
-
-        // Create the Engine after the window in case this happens to be a single-threaded platform.
-        // For single-threaded platforms, we need to ensure that Filament's OpenGL context is
-        // current, rather than the one created by SDL.
-        mFilamentApp->mEngine = Engine::create(config.backend, nullptr, nativeWindow);
-#else
         void* nativeWindow = ::getNativeWindow(mWindow);
 
         // Create the Engine after the window in case this happens to be a single-threaded platform.
         // For single-threaded platforms, we need to ensure that Filament's OpenGL context is
         // current, rather than the one created by SDL.
         mFilamentApp->mEngine = Engine::create(config.backend);
-#endif
+
         // get the resolved backend
         mBackend = config.backend = mFilamentApp->mEngine->getBackend();
 
@@ -600,6 +568,11 @@ FilamentApp::Window::Window(FilamentApp* filamentApp,
 
 #endif
 
+        // Select the feature level to use
+        config.featureLevel = std::min(config.featureLevel,
+                mFilamentApp->mEngine->getSupportedFeatureLevel());
+        mFilamentApp->mEngine->setActiveFeatureLevel(config.featureLevel);
+
         mSwapChain = mFilamentApp->mEngine->createSwapChain(nativeSwapChain);
     }
     mRenderer = mFilamentApp->mEngine->createRenderer();
@@ -621,7 +594,7 @@ FilamentApp::Window::Window(FilamentApp* filamentApp,
     if (config.splitView) {
         mViews.emplace_back(mDepthView = new CView(*mRenderer, "Depth View"));
         mViews.emplace_back(mGodView = new GodView(*mRenderer, "God View"));
-        mViews.emplace_back(mOrthoView = new CView(*mRenderer, "Ortho View"));
+        mViews.emplace_back(mOrthoView = new CView(*mRenderer, "Shadow View"));
     }
     mViews.emplace_back(mUiView = new CView(*mRenderer, "UI View"));
 
@@ -632,23 +605,23 @@ FilamentApp::Window::Window(FilamentApp* filamentApp,
             .build(config.cameraMode);
     mDebugCameraMan = CameraManipulator::Builder()
             .targetPosition(0, 0, -4)
-            .build(camutils::Mode::ORBIT);
+            .flightMoveDamping(15.0)
+            .build(config.cameraMode);
 
     mMainView->setCamera(mMainCamera);
     mMainView->setCameraManipulator(mMainCameraMan);
     if (config.splitView) {
         // Depth view always uses the main camera
         mDepthView->setCamera(mMainCamera);
+        mDepthView->setCameraManipulator(mMainCameraMan);
 
         // The god view uses the main camera for culling, but the debug camera for viewing
         mGodView->setCamera(mMainCamera);
         mGodView->setGodCamera(mDebugCamera);
+        mGodView->setCameraManipulator(mDebugCameraMan);
 
         // Ortho view obviously uses an ortho camera
         mOrthoView->setCamera( (Camera *)mMainView->getView()->getDirectionalLightCamera() );
-
-        mDepthView->setCameraManipulator(mMainCameraMan);
-        mGodView->setCameraManipulator(mDebugCameraMan);
     }
 
     // configure the cameras
@@ -822,8 +795,6 @@ void FilamentApp::Window::configureCamerasForWindow() {
     double far = 100;
     mMainCamera->setLensProjection(mFilamentApp->mCameraFocalLength, double(mainWidth) / height, near, far);
     mDebugCamera->setProjection(45.0, double(width) / height, 0.0625, 4096, Camera::Fov::VERTICAL);
-    mOrthoCamera->setProjection(Camera::Projection::ORTHO, -3, 3, -3 * ratio, 3 * ratio, near, far);
-    mOrthoCamera->lookAt({ 0, 0, 0 }, {0, 0, -4});
 
     // We're in split view when there are more views than just the Main and UI views.
     if (splitview) {

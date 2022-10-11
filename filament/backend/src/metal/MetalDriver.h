@@ -34,6 +34,8 @@ namespace backend {
 class MetalPlatform;
 
 class MetalBuffer;
+class MetalSamplerGroup;
+class MetalTexture;
 struct MetalUniformBuffer;
 struct MetalContext;
 struct MetalProgram;
@@ -126,8 +128,7 @@ private:
     inline void setRenderPrimitiveRange(Handle<HwRenderPrimitive> rph, PrimitiveType pt,
             uint32_t offset, uint32_t minIndex, uint32_t maxIndex, uint32_t count);
 
-    void enumerateSamplerGroups(const MetalProgram* program, ShaderType shaderType,
-            const std::function<void(const SamplerDescriptor*, size_t)>& f);
+    void finalizeSamplerGroup(MetalSamplerGroup* sg);
     void enumerateBoundUniformBuffers(const std::function<void(const UniformBufferState&,
             MetalBuffer*, uint32_t)>& f);
 

@@ -62,6 +62,11 @@ public:
         Builder();
         ~Builder() noexcept;
 
+        Builder(Builder const& rhs) = default;
+        Builder(Builder&& rhs) noexcept = default;
+        Builder& operator=(Builder const& rhs) = default;
+        Builder& operator=(Builder&& rhs) noexcept = default;
+
         struct ListEntry { // NOLINT(cppcoreguidelines-pro-type-member-init)
             std::string_view name;          // name of this sampler
             Type type;                      // type of this sampler
@@ -89,8 +94,7 @@ public:
         friend class SamplerInterfaceBlock;
         utils::CString mName;
         backend::ShaderStageFlags mStageFlags = backend::ShaderStageFlags::ALL_SHADER_STAGE_FLAGS;
-        utils::FixedCapacityVector<SamplerInfo> mEntries =
-                utils::FixedCapacityVector<SamplerInfo>::with_capacity(backend::MAX_SAMPLER_COUNT);
+        std::vector<SamplerInfo> mEntries;
     };
 
     // name of this sampler interface block

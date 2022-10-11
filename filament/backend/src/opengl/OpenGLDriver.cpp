@@ -512,8 +512,8 @@ void OpenGLDriver::textureStorage(OpenGLDriver::GLTexture* t,
 
     auto& gl = mContext;
 
-    bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-    gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+    bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+    gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
     switch (t->gl.target) {
         case GL_TEXTURE_2D:
@@ -1871,8 +1871,8 @@ void OpenGLDriver::setMinMaxLevels(Handle<HwTexture> th, uint32_t minLevel, uint
     auto& gl = mContext;
 
     GLTexture* t = handle_cast<GLTexture *>(th);
-    bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-    gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+    bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+    gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
     // Must fit within int8_t.
     assert_invariant(minLevel <= 0x7f && maxLevel <= 0x7f);
@@ -1908,8 +1908,8 @@ void OpenGLDriver::generateMipmaps(Handle<HwTexture> th) {
     assert_invariant(t->gl.target != GL_TEXTURE_2D_MULTISAMPLE);
     // Note: glGenerateMimap can also fail if the internal format is not both
     // color-renderable and filterable (i.e.: doesn't work for depth)
-    bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-    gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+    bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+    gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
     t->gl.baseLevel = 0;
     t->gl.maxLevel = static_cast<int8_t>(t->levels - 1);
@@ -1956,8 +1956,8 @@ void OpenGLDriver::setTextureData(GLTexture* t, uint32_t level,
             // fallthrough...
         case SamplerType::SAMPLER_2D:
             // NOTE: GL_TEXTURE_2D_MULTISAMPLE is not allowed
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             assert_invariant(t->gl.target == GL_TEXTURE_2D);
             glTexSubImage2D(t->gl.target, GLint(level),
                     GLint(xoffset), GLint(yoffset),
@@ -1965,8 +1965,8 @@ void OpenGLDriver::setTextureData(GLTexture* t, uint32_t level,
             break;
         case SamplerType::SAMPLER_3D:
             assert_invariant(zoffset + depth <= std::max(1u, t->depth >> level));
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             assert_invariant(t->gl.target == GL_TEXTURE_3D);
             glTexSubImage3D(t->gl.target, GLint(level),
                     GLint(xoffset), GLint(yoffset), GLint(zoffset),
@@ -1976,8 +1976,8 @@ void OpenGLDriver::setTextureData(GLTexture* t, uint32_t level,
         case SamplerType::SAMPLER_CUBEMAP_ARRAY:
             assert_invariant(zoffset + depth <= t->depth);
             // NOTE: GL_TEXTURE_2D_MULTISAMPLE is not allowed
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             assert_invariant(t->gl.target == GL_TEXTURE_2D_ARRAY ||
                     t->gl.target == GL_TEXTURE_CUBE_MAP_ARRAY);
             glTexSubImage3D(t->gl.target, GLint(level),
@@ -1986,8 +1986,8 @@ void OpenGLDriver::setTextureData(GLTexture* t, uint32_t level,
             break;
         case SamplerType::SAMPLER_CUBEMAP: {
             assert_invariant(t->gl.target == GL_TEXTURE_CUBE_MAP);
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
             assert_invariant(width == height);
             const size_t faceSize = PixelBufferDescriptor::computeDataSize(
@@ -2050,8 +2050,8 @@ void OpenGLDriver::setCompressedTextureData(GLTexture* t, uint32_t level,
             // fallthrough...
         case SamplerType::SAMPLER_2D:
             // NOTE: GL_TEXTURE_2D_MULTISAMPLE is not allowed
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             assert_invariant(t->gl.target == GL_TEXTURE_2D);
             glCompressedTexSubImage2D(t->gl.target, GLint(level),
                     GLint(xoffset), GLint(yoffset),
@@ -2059,8 +2059,8 @@ void OpenGLDriver::setCompressedTextureData(GLTexture* t, uint32_t level,
                     t->gl.internalFormat, imageSize, p.buffer);
             break;
         case SamplerType::SAMPLER_3D:
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             assert_invariant(t->gl.target == GL_TEXTURE_3D);
             glCompressedTexSubImage3D(t->gl.target, GLint(level),
                     GLint(xoffset), GLint(yoffset), GLint(zoffset),
@@ -2078,8 +2078,8 @@ void OpenGLDriver::setCompressedTextureData(GLTexture* t, uint32_t level,
             break;
         case SamplerType::SAMPLER_CUBEMAP: {
             assert_invariant(t->gl.target == GL_TEXTURE_CUBE_MAP);
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
             assert_invariant(width == height);
             const size_t faceSize = PixelBufferDescriptor::computeDataSize(
@@ -2139,8 +2139,8 @@ void OpenGLDriver::setExternalTexture(GLTexture* t, void* image) {
         assert_invariant(t->target == SamplerType::SAMPLER_EXTERNAL);
         assert_invariant(t->gl.target == GL_TEXTURE_EXTERNAL_OES);
 
-        bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, t);
-        gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+        bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, t);
+        gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
 
 #ifdef GL_OES_EGL_image
         glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, static_cast<GLeglImageOES>(image));
@@ -2340,9 +2340,9 @@ void OpenGLDriver::beginRenderPass(Handle<HwRenderTarget> rth,
         // EXT_multisampled_render_to_texture emulation).
         // We would need to perform a "backward" resolve, i.e. load the resolved texture into the
         // tile, everything must appear as though the multi-sample buffer was lost.
-        // However Filament specifies that a non multi-sample attachment to a
+        // However, Filament specifies that a non multi-sample attachment to a
         // multi-sample RenderTarget is always discarded. We do this because implementing
-        // the load on Metal is not trivial and it's not a feature we rely on at this time.
+        // the load on Metal is not trivial, and it's not a feature we rely on at this time.
         discardFlags |= rt->gl.resolve;
     }
 
@@ -2509,29 +2509,21 @@ GLsizei OpenGLDriver::getAttachments(AttachmentArray& attachments,
 }
 
 // Sets up a scissor rectangle that automatically gets clipped against the viewport.
-void OpenGLDriver::setViewportScissor(Viewport const& viewportScissor) noexcept {
+void OpenGLDriver::setScissor(Viewport const& scissor) noexcept {
+    constexpr uint32_t maxvalu = std::numeric_limits<int32_t>::max();
+
     auto& gl = mContext;
 
-    // In OpenGL, all four scissor parameters are actually signed, so clamp to MAX_INT32.
-    const int32_t maxval = std::numeric_limits<int32_t>::max();
-    int32_t left = std::min(viewportScissor.left, maxval);
-    int32_t bottom = std::min(viewportScissor.bottom, maxval);
-    uint32_t width = std::min(viewportScissor.width, uint32_t(maxval));
-    uint32_t height = std::min(viewportScissor.height, uint32_t(maxval));
-    // Compute the intersection of the requested scissor rectangle with the current viewport.
-    // Note that the viewport rectangle isn't necessarily equal to the bounds of the current
-    // Filament View (e.g., when post-processing is enabled).
-    OpenGLContext::vec4gli scissor;
-    OpenGLContext::vec4gli viewport = gl.getViewport();
-    scissor.x = std::max((int32_t)left, viewport[0]);
-    scissor.y = std::max((int32_t)bottom, viewport[1]);
-    int32_t right = std::min((int32_t)left + (int32_t)width, viewport[0] + viewport[2]);
-    int32_t top = std::min((int32_t)bottom + (int32_t)height, viewport[1] + viewport[3]);
-    // Compute width / height of the intersected region. If there's no intersection, pass zeroes
-    // rather than negative values to satisfy OpenGL requirements.
-    scissor.z = std::max(0, right - scissor.x);
-    scissor.w = std::max(0, top - scissor.y);
-    gl.setScissor(scissor.x, scissor.y, scissor.z, scissor.w);
+    // TODO: disable scissor when it is bigger than the current surface?
+    if (scissor.left == 0 && scissor.bottom == 0 &&
+        scissor.width >= maxvalu && scissor.height >= maxvalu) {
+        gl.disable(GL_SCISSOR_TEST);
+        return;
+    }
+
+    gl.setScissor(
+            GLint(scissor.left), GLint(scissor.bottom),
+            GLint(scissor.width), GLint(scissor.height));
     gl.enable(GL_SCISSOR_TEST);
 }
 
@@ -2582,15 +2574,31 @@ void OpenGLDriver::bindUniformBuffer(uint32_t index, Handle<HwBufferObject> ubh)
     CHECK_GL_ERROR(utils::slog.e)
 }
 
-void OpenGLDriver::bindUniformBufferRange(uint32_t index, Handle<HwBufferObject> ubh,
-        uint32_t offset, uint32_t size) {
+void OpenGLDriver::bindBufferRange(BufferObjectBinding bindingType, uint32_t index,
+        Handle<HwBufferObject> ubh, uint32_t offset, uint32_t size) {
     DEBUG_MARKER()
     auto& gl = mContext;
 
+    assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
+                     bindingType == BufferObjectBinding::UNIFORM);
+
     GLBufferObject* ub = handle_cast<GLBufferObject *>(ubh);
-    assert_invariant(ub->gl.binding == GL_UNIFORM_BUFFER);
+
+    GLenum target = GLUtils::getBufferBindingType(bindingType);
+
+    assert_invariant(bindingType == BufferObjectBinding::SHADER_STORAGE ||
+            ub->gl.binding == target);
+
     assert_invariant(offset + size <= ub->byteCount);
-    gl.bindBufferRange(ub->gl.binding, GLuint(index), ub->gl.id, offset, size);
+    gl.bindBufferRange(target, GLuint(index), ub->gl.id, offset, size);
+    CHECK_GL_ERROR(utils::slog.e)
+}
+
+void OpenGLDriver::unbindBuffer(BufferObjectBinding bindingType, uint32_t index) {
+    DEBUG_MARKER()
+    auto& gl = mContext;
+    GLenum target = GLUtils::getBufferBindingType(bindingType);
+    gl.bindBufferRange(target, GLuint(index), 0, 0, 0);
     CHECK_GL_ERROR(utils::slog.e)
 }
 
@@ -2767,6 +2775,58 @@ void OpenGLDriver::readPixels(Handle<HwRenderTarget> src,
     });
 }
 
+void OpenGLDriver::readBufferSubData(backend::BufferObjectHandle boh,
+        uint32_t offset, uint32_t size, backend::BufferDescriptor&& p) {
+    auto& gl = mContext;
+
+    GLBufferObject const* bo = handle_cast<GLBufferObject const*>(boh);
+
+    // TODO: measure the two solutions
+    if constexpr (true) {
+        // schedule a copy of the buffer we're reading into a PBO, this *should* happen
+        // asynchronously without stalling the CPU.
+        GLuint pbo;
+        glGenBuffers(1, &pbo);
+        gl.bindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+        glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)size, nullptr, GL_STATIC_DRAW);
+        gl.bindBuffer(bo->gl.binding, bo->gl.id);
+        glCopyBufferSubData(bo->gl.binding, GL_PIXEL_PACK_BUFFER, offset, 0, size);
+        gl.bindBuffer(bo->gl.binding, 0);
+        gl.bindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        CHECK_GL_ERROR(utils::slog.e)
+
+        // then, we schedule a mapBuffer of the PBO later, once the fence has signaled
+        auto* pUserBuffer = new BufferDescriptor(std::move(p));
+        whenGpuCommandsComplete([this, size, pbo, pUserBuffer]() mutable {
+            BufferDescriptor& p = *pUserBuffer;
+            auto& gl = mContext;
+            gl.bindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+            void* vaddr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, size, GL_MAP_READ_BIT);
+            if (vaddr) {
+                memcpy(p.buffer, vaddr, size);
+                glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+            }
+            gl.bindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            glDeleteBuffers(1, &pbo);
+            scheduleDestroy(std::move(p));
+            delete pUserBuffer;
+            CHECK_GL_ERROR(utils::slog.e)
+        });
+    } else {
+        gl.bindBuffer(bo->gl.binding, bo->gl.id);
+        // TODO: this glMapBufferRange may stall. Ideally we want to use whenGpuCommandsComplete
+        //       but that's tricky because boh could be destroyed right after this call.
+        void* vaddr = glMapBufferRange(bo->gl.binding, offset, size, GL_MAP_READ_BIT);
+        if (vaddr) {
+            memcpy(p.buffer, vaddr, size);
+            glUnmapBuffer(bo->gl.binding);
+        }
+        gl.bindBuffer(bo->gl.binding, 0);
+        scheduleDestroy(std::move(p));
+        CHECK_GL_ERROR(utils::slog.e)
+    }
+}
+
 void OpenGLDriver::whenGpuCommandsComplete(std::function<void()> fn) noexcept {
     GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     mGpuCommandCompleteOps.emplace_back(sync, std::move(fn));
@@ -2880,7 +2940,7 @@ void OpenGLDriver::endFrame(uint32_t frameId) {
     // at least do some minimal safety things here, such as resetting the VAO to 0.
     auto& gl = mContext;
     gl.bindVertexArray(nullptr);
-    for (int unit = OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1; unit >= 0; unit--) {
+    for (int unit = OpenGLContext::DUMMY_TEXTURE_BINDING; unit >= 0; unit--) {
         gl.bindTexture(unit, GL_TEXTURE_2D, 0);
     }
     gl.disable(GL_CULL_FACE);
@@ -3041,8 +3101,8 @@ void OpenGLDriver::updateTextureLodRange(GLTexture* texture, int8_t targetLevel)
     auto& gl = mContext;
     if (texture && any(texture->usage & TextureUsage::SAMPLEABLE)) {
         if (targetLevel < texture->gl.baseLevel || targetLevel > texture->gl.maxLevel) {
-            bindTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1, texture);
-            gl.activeTexture(OpenGLContext::MAX_TEXTURE_UNIT_COUNT - 1);
+            bindTexture(OpenGLContext::DUMMY_TEXTURE_BINDING, texture);
+            gl.activeTexture(OpenGLContext::DUMMY_TEXTURE_BINDING);
             if (targetLevel < texture->gl.baseLevel) {
                 texture->gl.baseLevel = targetLevel;
                 glTexParameteri(texture->gl.target, GL_TEXTURE_BASE_LEVEL, targetLevel);
@@ -3092,7 +3152,7 @@ void OpenGLDriver::draw(PipelineState state, Handle<HwRenderPrimitive> rph, uint
 
     gl.polygonOffset(state.polygonOffset.slope, state.polygonOffset.constant);
 
-    setViewportScissor(state.scissor);
+    setScissor(state.scissor);
 
     if (UTILS_LIKELY(instanceCount <= 1)) {
         glDrawRangeElements(GLenum(rp->type), rp->minIndex, rp->maxIndex, (GLsizei)rp->count,
@@ -3102,6 +3162,31 @@ void OpenGLDriver::draw(PipelineState state, Handle<HwRenderPrimitive> rph, uint
                 rp->gl.getIndicesType(), reinterpret_cast<const void*>(rp->offset),
                 (GLsizei)instanceCount);
     }
+
+#ifdef FILAMENT_ENABLE_MATDBG
+    CHECK_GL_ERROR_NON_FATAL(utils::slog.e)
+#else
+    CHECK_GL_ERROR(utils::slog.e)
+#endif
+}
+
+void OpenGLDriver::dispatchCompute(Handle<HwProgram> program, math::uint3 workGroupCount) {
+    executeRenderPassOps();
+
+    OpenGLProgram* p = handle_cast<OpenGLProgram*>(program);
+
+    // If the material debugger is enabled, avoid fatal (or cascading) errors and that can occur
+    // during the draw call when the program is invalid. The shader compile error has already been
+    // dumped to the console at this point, so it's fine to simply return early.
+    if (FILAMENT_ENABLE_MATDBG && UTILS_UNLIKELY(!p->isValid())) {
+        return;
+    }
+
+    useProgram(p);
+
+#if defined(GL_ES_VERSION_3_1) || defined(GL_VERSION_4_3)
+    glDispatchCompute(workGroupCount.x, workGroupCount.y, workGroupCount.z);
+#endif
 
 #ifdef FILAMENT_ENABLE_MATDBG
     CHECK_GL_ERROR_NON_FATAL(utils::slog.e)

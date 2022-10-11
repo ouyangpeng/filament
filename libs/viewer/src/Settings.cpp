@@ -19,6 +19,7 @@
 #include "jsonParseUtils.h"
 #include "Settings_generated.h"
 
+#include <filament/Engine.h>
 #include <filament/Camera.h>
 #include <filament/Renderer.h>
 #include <filament/Skybox.h>
@@ -321,6 +322,8 @@ static int parse(jsmntok_t const* tokens, int i, const char* jsonChunk,
         CHECK_KEY(tok);
         if (compare(tok, jsonChunk, "msaaSamples") == 0) {
             i = parse(tokens, i + 1, jsonChunk, &out->msaaSamples);
+        } else if (compare(tok, jsonChunk, "elvsm") == 0) {
+            i = parse(tokens, i + 1, jsonChunk, &out->elvsm);
         } else if (compare(tok, jsonChunk, "blurWidth") == 0) {
             i = parse(tokens, i + 1, jsonChunk, &out->blurWidth);
         } else {
@@ -345,6 +348,10 @@ static int parse(jsmntok_t const* tokens, int i, const char* jsonChunk,
         CHECK_KEY(tok);
         if (compare(tok, jsonChunk, "mapSize") == 0) {
             i = parse(tokens, i + 1, jsonChunk, &out->mapSize);
+        } else if (compare(tok, jsonChunk, "stable") == 0) {
+            i = parse(tokens, i + 1, jsonChunk, &out->stable);
+        } else if (compare(tok, jsonChunk, "lispsm") == 0) {
+            i = parse(tokens, i + 1, jsonChunk, &out->lispsm);
         } else if (compare(tok, jsonChunk, "screenSpaceContactShadows") == 0) {
             i = parse(tokens, i + 1, jsonChunk, &out->screenSpaceContactShadows);
         } else if (compare(tok, jsonChunk, "shadowCascades") == 0) {
@@ -470,7 +477,7 @@ int parse(jsmntok_t const* tokens, int i, const char* jsonChunk, Settings* out) 
     return i;
 }
 
-void applySettings(const ViewSettings& settings, View* dest) {
+void applySettings(Engine* engine, const ViewSettings& settings, View* dest) {
     dest->setAntiAliasing(settings.antiAliasing);
     dest->setTemporalAntiAliasingOptions(settings.taa);
     dest->setMultiSampleAntiAliasingOptions(settings.msaa);
@@ -498,13 +505,13 @@ static void apply(MaterialProperty<T> prop, MaterialInstance* dest) {
     }
 }
 
-void applySettings(const MaterialSettings& settings, MaterialInstance* dest) {
+void applySettings(Engine* engine, const MaterialSettings& settings, MaterialInstance* dest) {
     for (const auto& prop : settings.scalar) { apply(prop, dest); }
     for (const auto& prop : settings.float3) { apply(prop, dest); }
     for (const auto& prop : settings.float4) { apply(prop, dest); }
 }
 
-void applySettings(const LightSettings& settings, IndirectLight* ibl, utils::Entity sunlight,
+void applySettings(Engine* engine, const LightSettings& settings, IndirectLight* ibl, utils::Entity sunlight,
         utils::Entity* sceneLights, size_t sceneLightCount, LightManager* lm, Scene* scene, View* view) {
     auto light = lm->getInstance(sunlight);
     if (light) {
@@ -537,7 +544,7 @@ static LinearColor inverseTonemapSRGB(sRGBColor x) {
     return (x * -0.155f) / (x - 1.019f);
 }
 
-void applySettings(const ViewerOptions& settings, Camera* camera, Skybox* skybox,
+void applySettings(Engine* engine, const ViewerOptions& settings, Camera* camera, Skybox* skybox,
         Renderer* renderer) {
     if (renderer) {
         // we have to clear because the side-bar doesn't have a background, we cannot use
@@ -672,9 +679,12 @@ static std::ostream& operator<<(std::ostream& out, const LightManager::ShadowOpt
     return out << "{\n"
         << "\"vsm\": {\n"
         << "\"msaaSamples\": " << int(in.vsm.msaaSamples) << ",\n"
+        << "\"elvsm\": " << to_string(in.vsm.elvsm) << ",\n"
         << "\"blurWidth\": " << in.vsm.blurWidth << "\n"
         << "},\n"
         << "\"mapSize\": " << in.mapSize << ",\n"
+        << "\"stable\": " << to_string(in.stable) << ",\n"
+        << "\"lispsm\": " << to_string(in.lispsm) << ",\n"
         << "\"screenSpaceContactShadows\": " << to_string(in.screenSpaceContactShadows) << ",\n"
         << "\"shadowCascades\": " << int(in.shadowCascades) << ",\n"
         << "\"cascadeSplitPositions\": " << (splitsVector) << "\n"

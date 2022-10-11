@@ -61,7 +61,7 @@ public:
 
     // Replaces the specified shader text with new content.
     void replaceShader(backend::ShaderModel shaderModel, Variant variant,
-            ShaderType stage, const char* source, size_t sourceLength);
+            ShaderStage stage, const char* source, size_t sourceLength);
 
     bool isEmpty() const { return mShaderRecords.size() == 0; }
 
@@ -81,7 +81,7 @@ public:
 
     // Replaces the specified shader with new content.
     void replaceShader(backend::ShaderModel shaderModel, Variant variant,
-            ShaderType stage, const char* source, size_t sourceLength);
+            ShaderStage stage, const char* source, size_t sourceLength);
 
     bool isEmpty() const { return mDataBlobs.size() == 0 && mShaderRecords.size() == 0; }
 
@@ -117,7 +117,7 @@ ShaderReplacer::~ShaderReplacer() {
 }
 
 bool ShaderReplacer::replaceShaderSource(ShaderModel shaderModel, Variant variant,
-            ShaderType stage, const char* sourceString, size_t stringLength) {
+            ShaderStage stage, const char* sourceString, size_t stringLength) {
     if (!mOriginalPackage.parse()) {
         return false;
     }
@@ -171,10 +171,18 @@ bool ShaderReplacer::replaceShaderSource(ShaderModel shaderModel, Variant varian
 }
 
 bool ShaderReplacer::replaceSpirv(ShaderModel shaderModel, Variant variant,
-            ShaderType stage, const char* source, size_t sourceLength) {
+            ShaderStage stage, const char* source, size_t sourceLength) {
     assert_invariant(mMaterialTag == ChunkType::MaterialSpirv);
 
-    const EShLanguage shLang = stage == VERTEX ? EShLangVertex : EShLangFragment;
+    auto getShaderStage = [](ShaderStage type) {
+        switch (type) {
+            case ShaderStage::VERTEX:   return EShLanguage::EShLangVertex;
+            case ShaderStage::FRAGMENT: return EShLanguage::EShLangFragment;
+            case ShaderStage::COMPUTE:  return EShLanguage::EShLangCompute;
+        }
+    };
+
+    const EShLanguage shLang = getShaderStage(stage);
 
     std::string nullTerminated(source, sourceLength);
     source = nullTerminated.c_str();
@@ -185,10 +193,10 @@ bool ShaderReplacer::replaceSpirv(ShaderModel shaderModel, Variant variant,
     MaterialBuilder::TargetApi targetApi = targetApiFromBackend(mBackend);
     assert_invariant(targetApi == MaterialBuilder::TargetApi::VULKAN);
 
-    const int langVersion = GLSLTools::glslangVersionFromShaderModel(shaderModel);
+    const int version = GLSLTools::getGlslDefaultVersion(shaderModel);
     const EShMessages msg = GLSLTools::glslangFlagsFromTargetApi(targetApi,
             MaterialBuilder::TargetLanguage::SPIRV);
-    const bool ok = tShader.parse(&DefaultTBuiltInResource, langVersion, false, msg);
+    const bool ok = tShader.parse(&DefaultTBuiltInResource, version, false, msg);
     if (!ok) {
         slog.e << "ShaderReplacer parse:\n" << tShader.getInfoLog() << io::endl;
         return false;
@@ -304,11 +312,11 @@ void ShaderIndex::writeChunks(ostream& stream) {
 }
 
 void ShaderIndex::replaceShader(backend::ShaderModel shaderModel, Variant variant,
-            backend::ShaderType stage, const char* source, size_t sourceLength) {
-    const uint8_t model = (uint8_t) shaderModel;
+            backend::ShaderStage stage, const char* source, size_t sourceLength) {
+    const uint8_t model = uint8_t(shaderModel);
     for (auto& record : mShaderRecords) {
         if (record.shaderModel == model && record.variantKey == variant.key &&
-                record.stage == stage) {
+                record.stage == uint8_t(stage)) {
             record.shader = std::string(source, sourceLength);
             return;
         }
@@ -374,11 +382,11 @@ void BlobIndex::writeChunks(ostream& stream) {
 }
 
 void BlobIndex::replaceShader(ShaderModel shaderModel, Variant variant,
-            ShaderType stage, const char* source, size_t sourceLength) {
+            ShaderStage stage, const char* source, size_t sourceLength) {
     const uint8_t model = (uint8_t) shaderModel;
     for (auto& record : mShaderRecords) {
         if (record.shaderModel == model && record.variantKey == variant.key &&
-                record.stage == stage) {
+                record.stage == uint8_t(stage)) {
 
             // TODO: because a single blob entry might be used by more than one variant, matdbg
             // users may unwittingly edit more than 1 variant when multiple variants have the exact

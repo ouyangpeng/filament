@@ -656,7 +656,7 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
 
         RenderPass shadowPass(pass);
         shadowPass.setVariant(shadowVariant);
-        auto shadows = view.renderShadowMaps(fg, engine, driver, shadowPass);
+        auto shadows = view.renderShadowMaps(fg, engine, cameraInfo, shadowPass);
         blackboard["shadows"] = shadows;
     }
 
@@ -664,7 +664,7 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
     // recorded in the list of targets already rendered into -- this ensures that
     // initializeClearFlags() is called only once for the default RenderTarget.
     auto& previousRenderTargets = mPreviousRenderTargets;
-    FRenderTarget* const currentRenderTarget = upcast(view.getRenderTarget());
+    FRenderTarget* const currentRenderTarget = downcast(view.getRenderTarget());
     if (UTILS_LIKELY(
             previousRenderTargets.find(currentRenderTarget) == previousRenderTargets.end())) {
         previousRenderTargets.insert(currentRenderTarget);
@@ -903,6 +903,12 @@ void FRenderer::renderJob(ArenaScope& arena, FView& view) {
                     ppm.customResolveSubpass(driver);
                 });
     }
+
+    // this makes the viewport relative to xvp
+    // FIXME: we should use 'vp' when rendering directly into the swapchain, but that's hard to
+    //        know at this point. This will usually be the case when post-process is disabled.
+    // FIXME: we probably should take the dynamic scaling into account too
+    pass.setScissorViewport(hasPostProcess ? xvp : vp);
 
     // the color pass itself + color-grading as subpass if needed
     auto colorPassOutput = RendererUtils::colorPass(fg, "Color Pass", mEngine, view,

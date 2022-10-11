@@ -179,7 +179,7 @@ class ModelViewer(
         asset = assetLoader.createAsset(buffer)
         asset?.let { asset ->
             resourceLoader.asyncBeginLoad(asset)
-            animator = asset.animator
+            animator = asset.getInstance().animator
             asset.releaseSourceData()
         }
     }
@@ -202,7 +202,7 @@ class ModelViewer(
                 resourceLoader.addResourceData(uri, resourceBuffer)
             }
             resourceLoader.asyncBeginLoad(asset)
-            animator = asset.animator
+            animator = asset.getInstance().animator
             asset.releaseSourceData()
         }
     }
@@ -310,8 +310,8 @@ class ModelViewer(
 
     private fun addDetachListener(view: android.view.View) {
         view.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: android.view.View?) {}
-            override fun onViewDetachedFromWindow(v: android.view.View?) {
+            override fun onViewAttachedToWindow(v: android.view.View) {}
+            override fun onViewDetachedFromWindow(v: android.view.View) {
                 uiHelper.detach()
 
                 destroyModel()
@@ -359,7 +359,7 @@ class ModelViewer(
                 resourceLoader.addResourceData(uri, buffer)
             }
             resourceLoader.asyncBeginLoad(asset)
-            animator = asset.animator
+            animator = asset.getInstance().animator
             asset.releaseSourceData()
         }
     }

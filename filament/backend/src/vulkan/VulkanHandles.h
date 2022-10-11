@@ -117,18 +117,18 @@ struct VulkanRenderPrimitive : public HwRenderPrimitive {
 };
 
 struct VulkanFence : public HwFence {
-    VulkanFence(const VulkanCommandBuffer& commands) : fence(commands.fence) {}
+    explicit VulkanFence(const VulkanCommandBuffer& commands) : fence(commands.fence) {}
     std::shared_ptr<VulkanCmdFence> fence;
 };
 
 struct VulkanSync : public HwSync {
-    VulkanSync() {}
-    VulkanSync(const VulkanCommandBuffer& commands) : fence(commands.fence) {}
+    VulkanSync() = default;
+    explicit VulkanSync(const VulkanCommandBuffer& commands) : fence(commands.fence) {}
     std::shared_ptr<VulkanCmdFence> fence;
 };
 
 struct VulkanTimerQuery : public HwTimerQuery {
-    VulkanTimerQuery(VulkanContext& context);
+    explicit VulkanTimerQuery(VulkanContext& context);
     ~VulkanTimerQuery();
     uint32_t startingQueryIndex;
     uint32_t stoppingQueryIndex;
@@ -143,7 +143,9 @@ inline constexpr VkBufferUsageFlagBits getBufferObjectUsage(
             return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
         case BufferObjectBinding::UNIFORM:
             return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        // when adding more buffer types here, make sure to update VulkanBuffer::loadFromCpu()
+        case BufferObjectBinding::SHADER_STORAGE:
+            return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        // when adding more buffer-types here, make sure to update VulkanBuffer::loadFromCpu()
         // if necessary.
     }
 }

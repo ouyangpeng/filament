@@ -5,7 +5,44 @@ A new header is inserted each time a *tag* is created.
 
 ## main branch
 
+- gltfio: fix reloading crash in ubershader mode
+- Vulkan: improve performance in the readPixels path
+- Vulkan: fix black screen regression
+- engine: raise the spot shadows limit to 64, from 14.
+- engine: add experimental support for point light shadows.
+
+## v1.28.0
+
+- engine: LiSPSM is now a user settable option
+- engine: get the morph target buffer to the given primitive
+- Java: Fix TransformManager.getChildren()
+- Metal: newer devices are no longer limited to 16 samplers per Material.
+- gltfio: fix interpretation of occlusion strength
+- engine: minsdk is now 21 instead of 19. This allows the use of OpenGL ES 3.1
+- gltfio: fix ubershader issues with assignment of dummy textures
+- gltfio: material instances and variants are now accessed via `FilamentInstance` [⚠️ **API Change**]
+- gltfio: the animator can now only be accessed via `FilamentInstance` [⚠️ **API Change**]
+- engine: fix "stable" shadows and make the default cascade splits logarithmic.
+- engine: Add new quality options to EVSM shadows + rendering fixes
+
+## v1.27.2
+
+- gltfio: punctual lights are now duplicated when adding new asset instances
+- gltfio: FilamentInstance getAsset method now returns an immutable asset
+- gltfio: allow zero-instance assets
+- gltfio: fix regression with meshes that have no material
+- gltfio: fix regression with recomputeBoundingBoxes()
+- filamesh / matinfo: fix minor ASAN issues
+
+## v1.27.1
+
+- Java: add methods for TransformManager.getChildCount(), TransformManager.getChildren() and Scene.hasEntity()
 - engine: Fix stencil buffer writes with OpenGL backend.
+- gltfio: add new virtual method to MaterialProvider that all plugins must implement
+- gltfio: add an assert for inconsistent sRGB flags among usages of a particular texture
+- engine: improve scissor documentation
+- backend: scissor is no longer clipped to the viewport (done on filament side)
+- samples: add debug overdraw visualization to gltf_viewer
 
 ## v1.27.0
 

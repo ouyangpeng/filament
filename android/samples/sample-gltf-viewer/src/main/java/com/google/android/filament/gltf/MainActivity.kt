@@ -353,7 +353,7 @@ class MainActivity : Activity() {
     fun loadSettings(message: RemoteServer.ReceivedMessage) {
         val json = StandardCharsets.UTF_8.decode(message.buffer).toString()
         viewerContent.assetLights = modelViewer.asset?.lightEntities
-        automation.applySettings(json, viewerContent)
+        automation.applySettings(modelViewer.engine, json, viewerContent)
         modelViewer.view.colorGrading = automation.getColorGrading(modelViewer.engine)
         modelViewer.cameraFocalLength = automation.viewerOptions.cameraFocalLength
         updateRootTransform()
@@ -417,7 +417,7 @@ class MainActivity : Activity() {
 
     // Just for testing purposes, this releases the current model and reloads the default model.
     inner class DoubleTapListener : GestureDetector.SimpleOnGestureListener() {
-        override fun onDoubleTap(e: MotionEvent?): Boolean {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
             modelViewer.destroyModel()
             createDefaultRenderables()
             return super.onDoubleTap(e)

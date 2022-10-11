@@ -82,6 +82,9 @@ public:
         VkSpecializationInfo* specializationInfos = nullptr;
     };
 
+    using UsageFlags = utils::bitset128;
+    static UsageFlags getUsageFlags(uint16_t binding, ShaderStageFlags stages, UsageFlags src = {});
+
     #pragma clang diagnostic push
     #pragma clang diagnostic warning "-Wpadded"
 
@@ -150,7 +153,7 @@ public:
     void bindPrimitiveTopology(VkPrimitiveTopology topology) noexcept;
     void bindUniformBuffer(uint32_t bindingIndex, VkBuffer uniformBuffer,
             VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
-    void bindSamplers(VkDescriptorImageInfo samplers[SAMPLER_BINDING_COUNT]) noexcept;
+    void bindSamplers(VkDescriptorImageInfo samplers[SAMPLER_BINDING_COUNT], UsageFlags flags) noexcept;
     void bindInputAttachment(uint32_t bindingIndex, VkDescriptorImageInfo imageInfo) noexcept;
     void bindVertexArray(const VertexArray& varray) noexcept;
 
@@ -179,7 +182,6 @@ public:
 
     // Injects a dummy texture that can be used to clear out old descriptor sets.
     void setDummyTexture(VkImageView imageView) {
-        mDummySamplerInfo.imageView = imageView;
         mDummyTargetInfo.imageView = imageView;
     }
 
@@ -188,9 +190,9 @@ private:
     // PIPELINE LAYOUT CACHE KEY
     // -------------------------
 
-    // The cache key for pipeline layouts represents 32 samplers, each with 2 bits (one for each
-    // shader stage).
-    using PipelineLayoutKey = utils::bitset64;
+    using PipelineLayoutKey = utils::bitset128;
+
+    static_assert(PipelineLayoutKey::BIT_COUNT >= 2 * MAX_SAMPLER_COUNT);
 
     struct PipelineLayoutKeyHashFn {
         size_t operator()(const PipelineLayoutKey& key) const;
@@ -236,9 +238,9 @@ private:
         operator VkVertexInputBindingDescription() const {
             return { binding, stride, (VkVertexInputRate) inputRate };
         }
-        uint16_t    binding;
-        uint16_t    inputRate;
-        uint32_t    stride;
+        uint16_t binding;
+        uint16_t inputRate;
+        uint32_t stride;
     };
 
     // The pipeline key is a POD that represents all currently bound states that form the immutable
@@ -252,9 +254,10 @@ private:
         VertexInputBindingDescription vertexBuffers[VERTEX_ATTRIBUTE_COUNT];      //  128 : 156
         RasterState rasterState;                                                  //  16  : 284
         uint32_t padding;                                                         //  4   : 300
+        PipelineLayoutKey layout;                                                 // 16   : 304
     };
 
-    static_assert(sizeof(PipelineKey) == 304, "PipelineKey must not have implicit padding.");
+    static_assert(sizeof(PipelineKey) == 320, "PipelineKey must not have implicit padding.");
 
     using PipelineHashFn = utils::hash::MurmurHashFn<PipelineKey>;
 
@@ -291,16 +294,16 @@ private:
     // Represents all the Vulkan state that comprises a bound descriptor set.
     struct DescriptorKey {
         VkBuffer uniformBuffers[UBUFFER_BINDING_COUNT];             //   80     0
-        DescriptorImageInfo samplers[SAMPLER_BINDING_COUNT];        //  768    80
-        DescriptorImageInfo inputAttachments[TARGET_BINDING_COUNT]; //  192   848
-        uint32_t uniformBufferOffsets[UBUFFER_BINDING_COUNT];       //   40  1040
+        DescriptorImageInfo samplers[SAMPLER_BINDING_COUNT];        // 1488    80
+        DescriptorImageInfo inputAttachments[TARGET_BINDING_COUNT]; //  192  1568
+        uint32_t uniformBufferOffsets[UBUFFER_BINDING_COUNT];       //   40  1760
         uint32_t uniformBufferSizes[UBUFFER_BINDING_COUNT];         //   40  1080
     };
     static_assert(offsetof(DescriptorKey, samplers)              == 80);
-    static_assert(offsetof(DescriptorKey, inputAttachments)      == 848);
-    static_assert(offsetof(DescriptorKey, uniformBufferOffsets)  == 1040);
-    static_assert(offsetof(DescriptorKey, uniformBufferSizes)    == 1080);
-    static_assert(sizeof(DescriptorKey) == 1120, "DescriptorKey must not have implicit padding.");
+    static_assert(offsetof(DescriptorKey, inputAttachments)      == 1568);
+    static_assert(offsetof(DescriptorKey, uniformBufferOffsets)  == 1760);
+    static_assert(offsetof(DescriptorKey, uniformBufferSizes)    == 1800);
+    static_assert(sizeof(DescriptorKey) == 1840, "DescriptorKey must not have implicit padding.");
 
     using DescHashFn = utils::hash::MurmurHashFn<DescriptorKey>;
 
@@ -383,13 +386,11 @@ private:
     const RasterState mDefaultRasterState;
 
     // Current requirements for the pipeline layout, pipeline, and descriptor sets.
-    PipelineLayoutKey mLayoutRequirements = {};
     PipelineKey mPipelineRequirements = {};
     DescriptorKey mDescriptorRequirements = {};
     VkSpecializationInfo* mSpecializationRequirements = {};
 
-    // Current bindings for the pipeline layout, pipeline, and descriptor sets.
-    PipelineLayoutKey mBoundLayout = {};
+    // Current bindings for the pipeline and descriptor sets.
     PipelineKey mBoundPipeline = {};
     DescriptorKey mBoundDescriptor = {};
 
@@ -420,8 +421,6 @@ private:
 
     VkDescriptorBufferInfo mDummyBufferInfo = {};
     VkWriteDescriptorSet mDummyBufferWriteInfo = {};
-    VkDescriptorImageInfo mDummySamplerInfo = {};
-    VkWriteDescriptorSet mDummySamplerWriteInfo = {};
     VkDescriptorImageInfo mDummyTargetInfo = {};
     VkWriteDescriptorSet mDummyTargetWriteInfo = {};
 

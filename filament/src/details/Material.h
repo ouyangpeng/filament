@@ -17,7 +17,7 @@
 #ifndef TNT_FILAMENT_DETAILS_MATERIAL_H
 #define TNT_FILAMENT_DETAILS_MATERIAL_H
 
-#include "upcast.h"
+#include "downcast.h"
 
 #include "details/MaterialInstance.h"
 
@@ -53,7 +53,7 @@ public:
     void terminate(FEngine& engine);
 
     // return the uniform interface block for this material
-    const UniformInterfaceBlock& getUniformInterfaceBlock() const noexcept {
+    const BufferInterfaceBlock& getUniformInterfaceBlock() const noexcept {
         return mUniformInterfaceBlock;
     }
 
@@ -69,7 +69,7 @@ public:
 
     bool isSampler(const char* name) const noexcept;
 
-    UniformInterfaceBlock::UniformInfo const* reflect(std::string_view name) const noexcept;
+    BufferInterfaceBlock::FieldInfo const* reflect(std::string_view name) const noexcept;
 
     FMaterialInstance const* getDefaultInstance() const noexcept { return &mDefaultInstance; }
     FMaterialInstance* getDefaultInstance() noexcept { return &mDefaultInstance; }
@@ -140,9 +140,9 @@ public:
     }
 
     size_t getParameterCount() const noexcept {
-        return mUniformInterfaceBlock.getUniformInfoList().size() +
-                mSamplerInterfaceBlock.getSamplerInfoList().size() +
-                (mSubpassInfo.isValid ? 1 : 0);
+        return mUniformInterfaceBlock.getFieldInfoList().size() +
+               mSamplerInterfaceBlock.getSamplerInfoList().size() +
+               (mSubpassInfo.isValid ? 1 : 0);
     }
     size_t getParameters(ParameterInfo* parameters, size_t count) const noexcept;
 
@@ -224,7 +224,7 @@ private:
 
     FMaterialInstance mDefaultInstance;
     SamplerInterfaceBlock mSamplerInterfaceBlock;
-    UniformInterfaceBlock mUniformInterfaceBlock;
+    BufferInterfaceBlock mUniformInterfaceBlock;
     SubpassInfo mSubpassInfo;
     utils::FixedCapacityVector<std::pair<utils::CString, uint8_t>> mUniformBlockBindings;
     SamplerGroupBindingInfoList mSamplerGroupBindingInfoList;
@@ -245,7 +245,7 @@ private:
 };
 
 
-FILAMENT_UPCAST(Material)
+FILAMENT_DOWNCAST(Material)
 
 } // namespace filament
 

@@ -26,7 +26,7 @@
 
 #include <private/filament/EngineEnums.h>
 #include <private/filament/SamplerInterfaceBlock.h>
-#include <private/filament/UniformInterfaceBlock.h>
+#include <private/filament/BufferInterfaceBlock.h>
 
 #include <backend/DriverEnums.h>
 #include <backend/Program.h>
@@ -93,7 +93,7 @@ Material::Builder& Material::Builder::package(const void* payload, size_t size) 
 
 Material* Material::Builder::build(Engine& engine) {
     std::unique_ptr<MaterialParser> materialParser{ createParser(
-            upcast(engine).getBackend(), mImpl->mPayload, mImpl->mSize) };
+            downcast(engine).getBackend(), mImpl->mPayload, mImpl->mSize) };
 
     if (materialParser == nullptr) {
         return nullptr;
@@ -104,14 +104,18 @@ Material* Material::Builder::build(Engine& engine) {
     utils::bitset32 shaderModels;
     shaderModels.setValue(v);
 
-    ShaderModel shaderModel = upcast(engine).getShaderModel();
+    ShaderModel shaderModel = downcast(engine).getShaderModel();
     if (!shaderModels.test(static_cast<uint32_t>(shaderModel))) {
         CString name;
         materialParser->getName(&name);
         slog.e << "The material '" << name.c_str_safe() << "' was not built for ";
         switch (shaderModel) {
-            case ShaderModel::MOBILE: slog.e << "mobile.\n"; break;
-            case ShaderModel::DESKTOP: slog.e << "desktop.\n"; break;
+            case ShaderModel::MOBILE:
+                slog.e << "mobile.\n";
+                break;
+            case ShaderModel::DESKTOP:
+                slog.e << "desktop.\n";
+                break;
         }
         slog.e << "Compiled material contains shader models 0x"
                 << io::hex << shaderModels.getValue() << io::dec << "." << io::endl;
@@ -120,7 +124,7 @@ Material* Material::Builder::build(Engine& engine) {
 
     mImpl->mMaterialParser = materialParser.release();
 
-    return upcast(engine).createMaterial(*this);
+    return downcast(engine).createMaterial(*this);
 }
 
 FMaterial::FMaterial(FEngine& engine, const Material::Builder& builder)
@@ -135,12 +139,13 @@ FMaterial::FMaterial(FEngine& engine, const Material::Builder& builder)
 
     uint8_t featureLevel = 1;
     parser->getFeatureLevel(&featureLevel);
-    assert_invariant(featureLevel <= 2);
+    assert_invariant(featureLevel <= 3);
     mFeatureLevel = [featureLevel]() -> FeatureLevel {
         switch (featureLevel) {
             default:
             case 1: return FeatureLevel::FEATURE_LEVEL_1;
             case 2: return FeatureLevel::FEATURE_LEVEL_2;
+            case 3: return FeatureLevel::FEATURE_LEVEL_3;
         }
     }();
 
@@ -155,14 +160,15 @@ FMaterial::FMaterial(FEngine& engine, const Material::Builder& builder)
     // read the uniform binding list
     utils::FixedCapacityVector<std::pair<utils::CString, uint8_t>> uniformBlockBindings;
     success = parser->getUniformBlockBindings(&mUniformBlockBindings);
-    assert_invariant(success);
+    assert_invariant(success || mFeatureLevel >= FeatureLevel::FEATURE_LEVEL_2);
 
-    success = parser->getSamplerBlockBindings(&mSamplerGroupBindingInfoList, &mSamplerBindingToNameMap);
+    success = parser->getSamplerBlockBindings(
+            &mSamplerGroupBindingInfoList, &mSamplerBindingToNameMap);
     assert_invariant(success);
 
 #if FILAMENT_ENABLE_MATDBG
     // Register the material with matdbg.
-    matdbg::DebugServer* server = upcast(engine).debug.server;
+    matdbg::DebugServer* server = downcast(engine).debug.server;
     if (UTILS_UNLIKELY(server)) {
         auto details = builder.mImpl;
         mDebuggerId = server->addMaterial(mName, details->mPayload, details->mSize, this);
@@ -313,7 +319,7 @@ void FMaterial::terminate(FEngine& engine) {
 
 #if FILAMENT_ENABLE_MATDBG
     // Unregister the material with matdbg.
-    matdbg::DebugServer* server = upcast(mEngine).debug.server;
+    matdbg::DebugServer* server = downcast(mEngine).debug.server;
     if (UTILS_UNLIKELY(server)) {
         server->removeMaterial(mDebuggerId);
     }
@@ -328,8 +334,8 @@ FMaterialInstance* FMaterial::createInstance(const char* name) const noexcept {
 }
 
 bool FMaterial::hasParameter(const char* name) const noexcept {
-    return mUniformInterfaceBlock.hasUniform(name) ||
-            mSamplerInterfaceBlock.hasSampler(name) ||
+    return mUniformInterfaceBlock.hasField(name) ||
+           mSamplerInterfaceBlock.hasSampler(name) ||
             mSubpassInfo.name == utils::CString(name);
 }
 
@@ -337,9 +343,9 @@ bool FMaterial::isSampler(const char* name) const noexcept {
     return mSamplerInterfaceBlock.hasSampler(name);
 }
 
-UniformInterfaceBlock::UniformInfo const* FMaterial::reflect(
+BufferInterfaceBlock::FieldInfo const* FMaterial::reflect(
         std::string_view name) const noexcept {
-    return mUniformInterfaceBlock.getUniformInfo(name);
+    return mUniformInterfaceBlock.getFieldInfo(name);
 }
 
 void FMaterial::prepareProgramSlow(Variant variant) const noexcept {
@@ -348,9 +354,11 @@ void FMaterial::prepareProgramSlow(Variant variant) const noexcept {
         case MaterialDomain::SURFACE:
             getSurfaceProgramSlow(variant);
             break;
-
         case MaterialDomain::POST_PROCESS:
             getPostProcessProgramSlow(variant);
+            break;
+        case MaterialDomain::COMPUTE:
+            // TODO: implement MaterialDomain::COMPUTE
             break;
     }
 }
@@ -388,7 +396,7 @@ Program FMaterial::getProgramBuilderWithVariants(
     ShaderContent& vsBuilder = mEngine.getVertexShaderContent();
 
     UTILS_UNUSED_IN_RELEASE bool vsOK = mMaterialParser->getShader(vsBuilder, sm,
-            vertexVariant, ShaderType::VERTEX);
+            vertexVariant, ShaderStage::VERTEX);
 
     ASSERT_POSTCONDITION(isNoop || (vsOK && !vsBuilder.empty()),
             "The material '%s' has not been compiled to include the required "
@@ -402,7 +410,7 @@ Program FMaterial::getProgramBuilderWithVariants(
     ShaderContent& fsBuilder = mEngine.getFragmentShaderContent();
 
     UTILS_UNUSED_IN_RELEASE bool fsOK = mMaterialParser->getShader(fsBuilder, sm,
-            fragmentVariant, ShaderType::FRAGMENT);
+            fragmentVariant, ShaderStage::FRAGMENT);
 
     ASSERT_POSTCONDITION(isNoop || (fsOK && !fsBuilder.empty()),
             "The material '%s' has not been compiled to include the required "
@@ -410,8 +418,8 @@ Program FMaterial::getProgramBuilderWithVariants(
             mName.c_str(), variant.key, fragmentVariant.key);
 
     Program program;
-    program.shader(ShaderType::VERTEX, vsBuilder.data(), vsBuilder.size())
-           .shader(ShaderType::FRAGMENT, fsBuilder.data(), fsBuilder.size())
+    program.shader(ShaderStage::VERTEX, vsBuilder.data(), vsBuilder.size())
+           .shader(ShaderStage::FRAGMENT, fsBuilder.data(), fsBuilder.size())
            .uniformBlockBindings(mUniformBlockBindings)
            .diagnostics(mName,
                     [this, variant](io::ostream& out) -> io::ostream& {
@@ -451,7 +459,7 @@ void FMaterial::createAndCacheProgram(Program&& p, Variant variant) const noexce
 size_t FMaterial::getParameters(ParameterInfo* parameters, size_t count) const noexcept {
     count = std::min(count, getParameterCount());
 
-    const auto& uniforms = mUniformInterfaceBlock.getUniformInfoList();
+    const auto& uniforms = mUniformInterfaceBlock.getFieldInfoList();
     size_t i = 0;
     size_t uniformCount = std::min(count, size_t(uniforms.size()));
     for ( ; i < uniformCount; i++) {
@@ -519,7 +527,7 @@ void FMaterial::applyPendingEdits() noexcept {
 
 void FMaterial::onEditCallback(void* userdata, const utils::CString& name, const void* packageData,
         size_t packageSize) {
-    FMaterial* material = upcast((Material*) userdata);
+    FMaterial* material = downcast((Material*) userdata);
     FEngine& engine = material->mEngine;
 
     // This is called on a web server thread so we defer clearing the program cache
@@ -528,7 +536,7 @@ void FMaterial::onEditCallback(void* userdata, const utils::CString& name, const
 }
 
 void FMaterial::onQueryCallback(void* userdata, VariantList* pVariants) {
-    FMaterial* material = upcast((Material*) userdata);
+    FMaterial* material = downcast((Material*) userdata);
     std::lock_guard<utils::Mutex> lock(material->mActiveProgramsLock);
     *pVariants = material->mActivePrograms;
     material->mActivePrograms.reset();
