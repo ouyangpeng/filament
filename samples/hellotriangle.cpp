@@ -68,38 +68,63 @@ int main(int argc, char** argv) {
 
     App app;
     auto setup = [&app](Engine* engine, View* view, Scene* scene) {
+        
         app.skybox = Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
         scene->setSkybox(app.skybox);
+
         view->setPostProcessingEnabled(false);
+        
+        // Declare the layout of our mesh
         static_assert(sizeof(Vertex) == 12, "Strange vertex size.");
         app.vb = VertexBuffer::Builder()
                 .vertexCount(3)
                 .bufferCount(1)
+                // Because we interleave position and color data we must specify offset and stride
+                // We could use de-interleaved data by declaring two buffers and giving each
+                // attribute a different buffer index
                 .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT2, 0, 12)
                 .attribute(VertexAttribute::COLOR, 0, VertexBuffer::AttributeType::UBYTE4, 8, 12)
+                // We store colors as unsigned bytes but since we want values between 0 and 1
+                // in the material (shaders), we must mark the attribute as normalized
                 .normalized(VertexAttribute::COLOR)
                 .build(*engine);
+        // Feed the vertex data to the mesh
+        // We only set 1 buffer because the data is interleaved
         app.vb->setBufferAt(*engine, 0,
                 VertexBuffer::BufferDescriptor(TRIANGLE_VERTICES, 36, nullptr));
+        
+        // Create the indices
         app.ib = IndexBuffer::Builder()
                 .indexCount(3)
                 .bufferType(IndexBuffer::IndexType::USHORT)
                 .build(*engine);
         app.ib->setBuffer(*engine,
                 IndexBuffer::BufferDescriptor(TRIANGLE_INDICES, 6, nullptr));
+       
+        
         app.mat = Material::Builder()
                 .package(RESOURCES_BAKEDCOLOR_DATA, RESOURCES_BAKEDCOLOR_SIZE)
                 .build(*engine);
+        
+        // To create a renderable we first create a generic entity
         app.renderable = EntityManager::get().create();
+        // We then create a renderable component on that entity
+        // A renderable is made of several primitives; in this case we declare only 1
         RenderableManager::Builder(1)
+                // Overall bounding box of the renderable
                 .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
+                // Sets the material of the first primitive
                 .material(0, app.mat->getDefaultInstance())
+                // Sets the mesh data of the first primitive
                 .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, app.vb, app.ib, 0, 3)
                 .culling(false)
                 .receiveShadows(false)
                 .castShadows(false)
                 .build(*engine, app.renderable);
+        // Add the entity to the scene to render it
         scene->addEntity(app.renderable);
+
+        // Tell the view which camera we want to use
         app.camera = utils::EntityManager::get().create();
         app.cam = engine->createCamera(app.camera);
         view->setCamera(app.cam);

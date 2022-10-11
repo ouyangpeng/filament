@@ -16,10 +16,12 @@
 
 package com.google.android.filament.hellotriangle
 
+import android.animation.FloatEvaluator
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.opengl.Matrix
 import android.os.Bundle
+import android.util.Log
 import android.view.Choreographer
 import android.view.Surface
 import android.view.SurfaceView
@@ -36,6 +38,7 @@ import java.nio.channels.Channels
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+
 
 class MainActivity : Activity() {
     // Make sure to initialize Filament first
@@ -81,7 +84,8 @@ class MainActivity : Activity() {
     // Performs the rendering and schedules new frames
     private val frameScheduler = FrameCallback()
 
-    private val animator = ValueAnimator.ofFloat(0.0f, 360.0f)
+    // 创建ValueAnimator，并且实现value从 0 - 360 的变化
+    private val animator = ValueAnimator.ofFloat(0f, 360.0f)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,6 +109,11 @@ class MainActivity : Activity() {
 
         // NOTE: To choose a specific rendering resolution, add the following line:
         // uiHelper.setDesiredSize(1280, 720)
+
+//        val config: Configuration = resources.configuration
+//        val screenWidth = config.screenWidthDp
+//        val screenHeight = config.screenHeightDp
+//        uiHelper.setDesiredSize(screenHeight,screenWidth)
         uiHelper.attachTo(surfaceView)
     }
 
@@ -226,18 +235,24 @@ class MainActivity : Activity() {
 
     private fun startAnimation() {
         // Animate the triangle
+        //设置属性插值器
         animator.interpolator = LinearInterpolator()
+        // 设置动画持续时间为4000
         animator.duration = 4000
+        //设置动画重复播放的模式是从头开始RESTART，还是从倒播动画REVERSE，默认RESTART
         animator.repeatMode = ValueAnimator.RESTART
+        //设置重复次数：无限循环
         animator.repeatCount = ValueAnimator.INFINITE
-        animator.addUpdateListener(object : ValueAnimator.AnimatorUpdateListener {
+        animator.setEvaluator(FloatEvaluator())
+        //监听动画value值的改变，当value变化时回调onAnimationUpdate
+        animator.addUpdateListener { valueAnimator ->
             val transformMatrix = FloatArray(16)
-            override fun onAnimationUpdate(a: ValueAnimator) {
-                Matrix.setRotateM(transformMatrix, 0, -(a.animatedValue as Float), 0.0f, 0.0f, 1.0f)
-                val tcm = engine.transformManager
-                tcm.setTransform(tcm.getInstance(renderable), transformMatrix)
-            }
-        })
+            Log.d("MainActivity", "onAnimationUpdate : ${valueAnimator.animatedValue}")
+            Matrix.setRotateM(transformMatrix, 0, -(valueAnimator.animatedValue as Float), 0.0f, 0.0f, 1.0f)
+            val tcm = engine.transformManager
+            tcm.setTransform(tcm.getInstance(renderable), transformMatrix)
+        }
+        // 启动动画
         animator.start()
     }
 
@@ -258,7 +273,7 @@ class MainActivity : Activity() {
 
         // Stop the animation and any pending frame
         choreographer.removeFrameCallback(frameScheduler)
-        animator.cancel();
+        animator.cancel()
 
         // Always detach the surface before destroying the engine
         uiHelper.detach()
@@ -305,11 +320,11 @@ class MainActivity : Activity() {
         override fun onNativeWindowChanged(surface: Surface) {
             swapChain?.let { engine.destroySwapChain(it) }
             swapChain = engine.createSwapChain(surface, uiHelper.swapChainFlags)
-            displayHelper.attach(renderer, surfaceView.display);
+            displayHelper.attach(renderer, surfaceView.display)
         }
 
         override fun onDetachedFromSurface() {
-            displayHelper.detach();
+            displayHelper.detach()
             swapChain?.let {
                 engine.destroySwapChain(it)
                 // Required to ensure we don't return before Filament is done executing the
