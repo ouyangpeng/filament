@@ -15,7 +15,7 @@ filamentTools {
 // don't forget to update MainACtivity.kt when/if changing this.
 task copyMesh(type: Copy) {
     from "../../../third_party/models/BusterDrone"
-    into "src/main/assets/models"
+    into "src/main/assets/models/scene"
 }
 
 preBuild.dependsOn copyMesh

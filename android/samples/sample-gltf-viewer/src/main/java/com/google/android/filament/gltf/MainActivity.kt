@@ -135,7 +135,8 @@ class MainActivity : Activity() {
     }
 
     private fun createDefaultRenderables() {
-        val buffer = assets.open("models/scene.gltf").use { input ->
+        // "models/scene/scene.gltf"
+        val buffer = assets.open("models/grogu/grogu.glb").use { input ->
             val bytes = ByteArray(input.available())
             input.read(bytes)
             ByteBuffer.wrap(bytes)

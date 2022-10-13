@@ -10,10 +10,12 @@
       android:roundIcon="@mipmap/ic_launcher_round"
       android:supportsRtl="true"
       android:largeHeap="true"
-      android:theme="@android:style/Theme.NoTitleBar">
+      android:theme="@style/AppTheme">
+
+    <!--      android:name="com.google.android.filament.gltf.MainActivity"-->
     <activity
         android:exported="true"
-        android:name="com.google.android.filament.gltf.MainActivity"
+        android:name="com.google.android.filament.gltf.Main2Activity"
         android:screenOrientation="fullSensor"
         android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
       <intent-filter>
@@ -22,6 +24,7 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
+
   </application>
 
 </manifest>
