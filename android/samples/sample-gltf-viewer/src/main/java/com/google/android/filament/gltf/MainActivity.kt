@@ -92,7 +92,7 @@ class MainActivity : Activity() {
         }
 
         createDefaultRenderables()
-        createIndirectLight()
+        createIndirectLightAndSkybox("venetian_crossroads_2k")
 
         setStatusText("To load a new model, go to the above URL on your host machine.")
 
@@ -134,9 +134,11 @@ class MainActivity : Activity() {
         remoteServer = RemoteServer(8082)
     }
 
-    private fun createDefaultRenderables() {
-        // "models/scene/scene.gltf"
-        val buffer = assets.open("models/grogu/grogu.glb").use { input ->
+    /**
+     * 设置要渲染的模型
+     */
+    private fun createDefaultRenderables(modelUri: String = "models/grogu/grogu.glb") {
+        val buffer = assets.open(modelUri).use { input ->
             val bytes = ByteArray(input.available())
             input.read(bytes)
             ByteBuffer.wrap(bytes)
@@ -146,15 +148,19 @@ class MainActivity : Activity() {
         updateRootTransform()
     }
 
-    private fun createIndirectLight() {
+    /**
+     * 设置环境和光照
+     */
+    private fun createIndirectLightAndSkybox(ibl: String ="default_env") {
         val engine = modelViewer.engine
         val scene = modelViewer.scene
-        val ibl = "default_env"
+        // 设置光照
         readCompressedAsset("envs/$ibl/${ibl}_ibl.ktx").let {
             scene.indirectLight = KTX1Loader.createIndirectLight(engine, it)
             scene.indirectLight!!.intensity = 30_000.0f
             viewerContent.indirectLight = modelViewer.scene.indirectLight
         }
+        // 设置环境天空盒子
         readCompressedAsset("envs/$ibl/${ibl}_skybox.ktx").let {
             scene.skybox = KTX1Loader.createSkybox(engine, it)
         }

@@ -57,9 +57,10 @@ class Main2Activity : Activity() {
             setSurfaceView(surfaceView)
 
             //directory and model each as param
-//            loadGlb(this@Main2Activity, "grogu", "grogu")
+            loadGlb(this@Main2Activity, "grogu", "grogu")
+            //loadGlb(this@Main2Activity, "tiger", "tiger")
+
             //loadGltf(this@Main2Activity, "warcraft", "scene")
-            loadGlb(this@Main2Activity, "tiger", "tiger")
 
             //directory and model as one
             // loadGlb(this@Main2Activity, "grogu/grogu")
